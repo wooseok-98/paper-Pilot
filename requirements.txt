@@ -1,0 +1,7 @@
+arxiv
+anthropic
+langgraph
+python-dotenv
+sentence-transformers
+faiss-cpu
+streamlit
