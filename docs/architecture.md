@@ -78,7 +78,7 @@
 | **QA** | 2 | 검색된 초록으로 답변 가능한지 판정, 부족하면 **쿼리 재작성 후 재검색** | Self-RAG / CRAG |
 | **Critic** | 3 | 답변이 초록에 실제 근거 있는지 채점, 미근거면 **QA에 재작성 반려** | Reflection / Generator-Critic |
 
-> **Researcher 자기교정 근거:** arXiv 기본 검색은 단어를 넓게 매칭 — `"stable diffusion"` 검색 시 물리학 diffusion 논문이 혼입되는 문제를 실제로 확인. 정적 쿼리로는 해결 불가하므로 결과 평가 후 재검색하는 에이전트 구조가 필요
+> **Researcher 자기교정 근거:** arXiv 기본 검색에서 실증한 **반대 방향의 두 실패** — (1) 오염(precision): `"stable diffusion"` 검색 시 재료과학 diffusion 논문 혼입, 20개까지 확장해도 지속. (2) 누락(recall): 원조 논문("High-Resolution Image Synthesis with Latent Diffusion Models")은 20위 안에도 없음 — 논문 제목에 "stable"이라는 단어 자체가 없어 키워드 매칭 실패(어휘 불일치). 정적 쿼리로는 해결 불가하므로 결과 평가 후 재검색하는 에이전트 구조가 필요
 
 > **QA self-RAG 근거:** 검색 한 번 후 무조건 답하면 정적 RAG 함수 — 근거 부족 시 재검색하는 판단 루프가 있어야 에이전트. LLM grader가 **관련성·충분성**을 채점해 재검색 여부 결정
 
@@ -106,10 +106,13 @@
 
 ### 1. 검색 (Researcher)
 ```
-쿼리 → arXiv 검색 → 결과 평가 (의도와 맞나?)
-                        ├ 부적합 → 쿼리 수정 → 재검색 (최대 N회)
+쿼리 → LLM: 대체 기술 용어 제안 (제품명↔논문 정식 용어 매핑, 예: "stable diffusion"→"latent diffusion model")
+     → 원본 쿼리 + 대체 쿼리 각각 arXiv 검색 → paper_id 기준 병합
+     → 결과 평가 (의도와 맞나? 충분한가?)
+                        ├ 부적합 → 쿼리 재수정(카테고리 필터 등) → 재검색 (최대 N회)
                         └ 적합 → Ingestor (초록·메타데이터 임베딩 → DB)
 ```
+> 대체 쿼리 생성은 누락(recall) 대응, 재시도 루프의 카테고리 필터는 오염(precision) 대응 — 반대 방향 실패 둘 다 다룸
 
 ### 2. 질의응답 (QA → Critic)
 ```
@@ -150,6 +153,8 @@
 | 검증 노드 | **Critic 추가** | 초록 기반 답변의 환각 억제, "RAG 환각 어떻게 막나" 대응. Reflection 패턴 |
 | Comparator | **제외** | 자기교정 루프 없는 정적 LLM 체인 → 가짜 에이전트. 필요 시 루프 넣어 후속 부활 |
 | 서빙 방식 | **Streamlit → FastAPI로 변경** | 최종 목표가 API 서비스라 Streamlit은 나중에 버릴 코드가 됨(YAGNI 위배). 그래프는 CLI 스모크 테스트(`graph.invoke()` + print)로 UI 없이 먼저 검증하고, 완성 후 FastAPI Router-Controller를 얇은 HTTP 어댑터로 씌움 — LangGraph 엔진 자체는 그대로 재사용 |
+| 누락(recall) 대응 | **첫 검색부터 대체 쿼리 병행** (반응형 재검색 아님) | 결과만 보고 판단하는 자기교정은 "애초에 없는 논문"을 알아채기 어려움(맹점) → LLM 배경지식으로 원본+대체 용어를 처음부터 병행 검색해 병합. `call_structured()` 단발 호출로 충분 — 별도 "쿼리 확장 에이전트"로 만들지 않음(자기교정 루프 없어 가짜 에이전트가 됨, Comparator와 같은 함정) |
+| 임베딩 파인튜닝 | **보류(조건부)** — Future Work에서 확정 계획 아닌 검토 항목으로 하향 | (1) 파인튜닝이 실제로 고치는 지점(질문↔초록 매칭)은 실증된 문제가 아니라 가설 — 검증 없이 확정하면 이 프로젝트가 지켜온 증거 기반 결정 원칙에 위배. (2) `all-MiniLM-L6-v2`가 이미 QA 스타일 문장쌍 포함 대규모 데이터로 학습돼 이 용도에 이미 준수한 성능일 가능성. **재검토 조건:** #6~#8 완성 후 Evaluation의 "검색 관련도" 지표로 실측해서 실제로 부족하면 그때 착수 |
 
 > 상세 결정 기록은 `docs/decisions.md` (ADR — 결정 시마다 누적)
 
@@ -168,8 +173,9 @@
 
 ## Future Work
 - **PDF 전문 인덱싱 + 전문 기반 요약** — 심층 질의응답 (Non-Goal에서 승격)
-- **병렬 fan-out** — 넓은 질문을 하위주제로 분해해 Researcher N개 동시 실행 + Synthesizer 병합 (LangGraph `Send` map-reduce)
+- **병렬 fan-out (하위주제)** — 넓은 질문을 하위주제로 분해해 Researcher N개 동시 실행 + Synthesizer 병합 (LangGraph `Send` map-reduce)
+- **병렬 fan-out (쿼리 변형)** — Researcher의 대체 쿼리를 1개가 아니라 3~5개 동시 생성해 `Send`로 병렬 검색·병합(Multi-Query Retrieval). 하위주제 fan-out보다 스코프가 작아 `Send` 메커니즘을 먼저 연습해볼 디딤돌로 적합. #6에서 대체 쿼리 1개짜리로 먼저 검증 후, 그래도 누락이 남으면 업그레이드
 - **Comparator 부활** — 비교표 빈칸 감지 시 추가 검색하는 자기교정 루프 부여
-- 쿼리 확장(유의어), 다중 소스 폴백 (Semantic Scholar — 인용 그래프 확보)
-- **임베딩 모델 파인튜닝** — `all-MiniLM-L6-v2`를 논문 도메인에 맞게 대조학습(contrastive learning)으로 파인튜닝(`sentence-transformers` `MultipleNegativesRankingLoss`). 학습 데이터는 arXiv 자체에서 라벨링 없이 구성(제목=anchor, 초록=positive, 또는 인용 관계). **동기:** 스파이크에서 실증한 어휘 불일치 문제(`"stable diffusion"` 검색이 원조 논문 "Latent Diffusion Models"를 못 찾음) 직접 해결. **검증:** Evaluation의 "검색 관련도" 지표로 파인튜닝 전/후 비교. SPECTER/SPECTER2(논문 특화 사전학습 임베딩) 대비 성능도 참고 가능
+- 다중 소스 폴백 (Semantic Scholar — 인용 그래프 확보)
+- **임베딩 모델 파인튜닝 (조건부)** — Design Decisions 참고. #6~#8 완성 후 "검색 관련도" 지표로 실측해서 질문↔초록 매칭이 실제로 부족할 때만 착수. 착수 시: `all-MiniLM-L6-v2`를 `sentence-transformers` `MultipleNegativesRankingLoss`로 파인튜닝, 학습 데이터는 `call_llm()`으로 초록마다 합성 질문 생성(질문=anchor, 초록=positive) — 실제 추론 시나리오(질문→초록)와 형태 일치. (제목,초록) 쌍은 보조로만. 검증은 동일 지표로 전/후 비교
 - **FastAPI 서빙** — 그래프 완성·CLI 검증 후, Router-Controller를 얇은 어댑터로 씌워 HTTP API화. `graph.astream()`으로 에이전트 중간 진행 상황(검색 중/검증 중 등) 스트리밍 고려
