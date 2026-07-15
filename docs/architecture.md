@@ -133,7 +133,7 @@
 | 논문 검색 | arxiv (Semantic Scholar는 후속) |
 | 임베딩 | sentence-transformers `all-MiniLM-L6-v2` (영어) |
 | 벡터 DB | FAISS (인덱스 + 메타데이터 JSON) |
-| UI | Streamlit |
+| 서빙 | FastAPI (Router-Controller — LangGraph 엔진을 그대로 감싸는 얇은 HTTP 어댑터) |
 
 ---
 
@@ -149,6 +149,7 @@
 | 조율 방식 | **순차 라우팅 + Critic** | 병렬 fan-out 없이도 자율 루프 3개(Researcher·QA·Critic)로 멀티 에이전트 성립. 병렬은 복잡도 대비 이득이 MVP 스코프엔 불필요 |
 | 검증 노드 | **Critic 추가** | 초록 기반 답변의 환각 억제, "RAG 환각 어떻게 막나" 대응. Reflection 패턴 |
 | Comparator | **제외** | 자기교정 루프 없는 정적 LLM 체인 → 가짜 에이전트. 필요 시 루프 넣어 후속 부활 |
+| 서빙 방식 | **Streamlit → FastAPI로 변경** | 최종 목표가 API 서비스라 Streamlit은 나중에 버릴 코드가 됨(YAGNI 위배). 그래프는 CLI 스모크 테스트(`graph.invoke()` + print)로 UI 없이 먼저 검증하고, 완성 후 FastAPI Router-Controller를 얇은 HTTP 어댑터로 씌움 — LangGraph 엔진 자체는 그대로 재사용 |
 
 > 상세 결정 기록은 `docs/decisions.md` (ADR — 결정 시마다 누적)
 
@@ -170,3 +171,5 @@
 - **병렬 fan-out** — 넓은 질문을 하위주제로 분해해 Researcher N개 동시 실행 + Synthesizer 병합 (LangGraph `Send` map-reduce)
 - **Comparator 부활** — 비교표 빈칸 감지 시 추가 검색하는 자기교정 루프 부여
 - 쿼리 확장(유의어), 다중 소스 폴백 (Semantic Scholar — 인용 그래프 확보)
+- **임베딩 모델 파인튜닝** — `all-MiniLM-L6-v2`를 논문 도메인에 맞게 대조학습(contrastive learning)으로 파인튜닝(`sentence-transformers` `MultipleNegativesRankingLoss`). 학습 데이터는 arXiv 자체에서 라벨링 없이 구성(제목=anchor, 초록=positive, 또는 인용 관계). **동기:** 스파이크에서 실증한 어휘 불일치 문제(`"stable diffusion"` 검색이 원조 논문 "Latent Diffusion Models"를 못 찾음) 직접 해결. **검증:** Evaluation의 "검색 관련도" 지표로 파인튜닝 전/후 비교. SPECTER/SPECTER2(논문 특화 사전학습 임베딩) 대비 성능도 참고 가능
+- **FastAPI 서빙** — 그래프 완성·CLI 검증 후, Router-Controller를 얇은 어댑터로 씌워 HTTP API화. `graph.astream()`으로 에이전트 중간 진행 상황(검색 중/검증 중 등) 스트리밍 고려

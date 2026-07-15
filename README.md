@@ -35,10 +35,11 @@
 | 논문 검색 | arXiv API |
 | 임베딩 | sentence-transformers (`all-MiniLM-L6-v2`) |
 | 벡터 DB | FAISS |
-| UI | Streamlit |
+| 서빙 | FastAPI (Router-Controller, LangGraph 엔진을 감싸는 HTTP 어댑터) |
 
 ## 프로젝트 구조
 ```
+app.py               # FastAPI 진입점 (Router-Controller)
 src/
 ├── search.py       # arXiv 검색
 ├── embedding.py    # 문장 → 벡터
