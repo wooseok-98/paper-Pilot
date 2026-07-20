@@ -39,7 +39,7 @@
 
 ## 프로젝트 구조
 ```
-app.py               # FastAPI 진입점 (Router-Controller)
+app.py              # FastAPI 진입점 (Router-Controller)
 src/
 ├── search.py       # arXiv 검색
 ├── embedding.py    # 문장 → 벡터

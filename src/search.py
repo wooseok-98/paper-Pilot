@@ -2,7 +2,7 @@
 import arxiv
 
 
-def search_papers(query: str, max_results: int = 5) -> list[dict]:
+def search_papers(query: str, max_results: int = 10) -> list[dict]:
     search = arxiv.Search(
         query=query,
         max_results=max_results,

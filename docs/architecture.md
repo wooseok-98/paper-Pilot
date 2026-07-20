@@ -74,11 +74,11 @@
 | 에이전트 | Layer | 자율 행동 | 패턴 |
 | --- | --- | --- | --- |
 | **Orchestrator** | 1 | 의도 분류 → 워커 라우팅 | Routing |
-| **Researcher** | 2 | 검색 결과가 의도와 어긋나면 **쿼리를 수정해 재검색** | Self-correction |
+| **Researcher** | 2 | 넓게 검색 후 **논문별 관련성을 채점해 솎아냄**, 통과분 부족하면 후보 확장 후 재필터 | Self-correction / CRAG |
 | **QA** | 2 | 검색된 초록으로 답변 가능한지 판정, 부족하면 **쿼리 재작성 후 재검색** | Self-RAG / CRAG |
 | **Critic** | 3 | 답변이 초록에 실제 근거 있는지 채점, 미근거면 **QA에 재작성 반려** | Reflection / Generator-Critic |
 
-> **Researcher 자기교정 근거:** arXiv 기본 검색에서 실증한 **반대 방향의 두 실패** — (1) 오염(precision): `"stable diffusion"` 검색 시 재료과학 diffusion 논문 혼입, 20개까지 확장해도 지속. (2) 누락(recall): 원조 논문("High-Resolution Image Synthesis with Latent Diffusion Models")은 20위 안에도 없음 — 논문 제목에 "stable"이라는 단어 자체가 없어 키워드 매칭 실패(어휘 불일치). 정적 쿼리로는 해결 불가하므로 결과 평가 후 재검색하는 에이전트 구조가 필요
+> **Researcher 자기교정 근거:** arXiv 기본 검색에서 실증한 **반대 방향의 두 실패** — (1) 오염(precision): `"stable diffusion"` 검색 시 재료과학 diffusion 논문 혼입, 20개까지 확장해도 지속. (2) 누락(recall): 원조 논문("High-Resolution Image Synthesis with Latent Diffusion Models")은 20위 안에도 없음(arXiv Relevance 정렬이 유명 논문·인용수를 반영 안 함). **자기교정 지렛대 전환:** 처음엔 "결과 평가 → 쿼리 재작성 후 재검색"으로 설계했으나, LLM이 만든 `NOT ...` 제외 쿼리를 arXiv API가 지원하지 않아 5회 재시도 전부 실패하고 오염된 결과를 저장 → **교정 행동이 도구 능력과 맞아야 작동**한다는 교훈. 쿼리 재작성(arXiv가 무시) 대신 **결과 필터링(우리가 통제)** 으로 전환: 넓게 검색해 잡음을 감수하고, LLM이 논문별 관련성을 채점해 솎아냄(CRAG). 이렇게 하면 대체 쿼리(recall)가 끌어온 잡음도 필터가 청소
 
 > **QA self-RAG 근거:** 검색 한 번 후 무조건 답하면 정적 RAG 함수 — 근거 부족 시 재검색하는 판단 루프가 있어야 에이전트. LLM grader가 **관련성·충분성**을 채점해 재검색 여부 결정
 
@@ -107,12 +107,12 @@
 ### 1. 검색 (Researcher)
 ```
 쿼리 → LLM: 대체 기술 용어 제안 (제품명↔논문 정식 용어 매핑, 예: "stable diffusion"→"latent diffusion model")
-     → 원본 쿼리 + 대체 쿼리 각각 arXiv 검색 → paper_id 기준 병합
-     → 결과 평가 (의도와 맞나? 충분한가?)
-                        ├ 부적합 → 쿼리 재수정(카테고리 필터 등) → 재검색 (최대 N회)
-                        └ 적합 → Ingestor (초록·메타데이터 임베딩 → DB)
+     → 원본 쿼리 + 대체 쿼리 각각 arXiv 검색 → paper_id 기준 병합 (넓게, recall)
+     → filter_relevant: LLM이 논문별 관련성 채점 → 관련 paper_id만 남김 (precision)
+                        ├ 통과분 < min_results → 후보 더 검색해 확장 → 재필터 (최대 N회)
+                        └ 충분 → Ingestor (통과분만 초록·메타데이터 임베딩 → DB)
 ```
-> 대체 쿼리 생성은 누락(recall) 대응, 재시도 루프의 카테고리 필터는 오염(precision) 대응 — 반대 방향 실패 둘 다 다룸
+> 대체 쿼리 생성은 누락(recall) 대응, 결과 필터링은 오염(precision) 대응 — 반대 방향 실패 둘 다 다룸. 저장은 필터 통과분만 → 자기교정이 포기해도 불량 데이터 저장 안 함
 
 ### 2. 질의응답 (QA → Critic)
 ```
@@ -154,6 +154,7 @@
 | Comparator | **제외** | 자기교정 루프 없는 정적 LLM 체인 → 가짜 에이전트. 필요 시 루프 넣어 후속 부활 |
 | 서빙 방식 | **Streamlit → FastAPI로 변경** | 최종 목표가 API 서비스라 Streamlit은 나중에 버릴 코드가 됨(YAGNI 위배). 그래프는 CLI 스모크 테스트(`graph.invoke()` + print)로 UI 없이 먼저 검증하고, 완성 후 FastAPI Router-Controller를 얇은 HTTP 어댑터로 씌움 — LangGraph 엔진 자체는 그대로 재사용 |
 | 누락(recall) 대응 | **첫 검색부터 대체 쿼리 병행** (반응형 재검색 아님) | 결과만 보고 판단하는 자기교정은 "애초에 없는 논문"을 알아채기 어려움(맹점) → LLM 배경지식으로 원본+대체 용어를 처음부터 병행 검색해 병합. `call_structured()` 단발 호출로 충분 — 별도 "쿼리 확장 에이전트"로 만들지 않음(자기교정 루프 없어 가짜 에이전트가 됨, Comparator와 같은 함정) |
+| 오염(precision) 대응 | **쿼리 재작성 → 결과 필터링(CRAG)으로 전환** | 첫 설계(결과 평가→`revised_query` 재검색)는 실행 시 5회 재시도 전부 실패 후 오염 데이터 저장 — LLM이 만든 `NOT ...` 제외 쿼리를 **arXiv가 지원 안 함**(자기교정 지렛대가 도구 능력과 안 맞음). arXiv에 의존하는 쿼리 재작성 대신 **우리가 통제하는 결과 필터링**으로 전환: `filter_relevant`가 논문별 관련성 채점→관련 `paper_id`만 배열로 받아 솎음, 통과분 부족 시에만 후보 확장 후 재필터. 저장은 통과분만(불량 저장 방지). 필터 프롬프트는 "비슷한 기법을 다른 분야에 쓴 논문 제외"로 조여야 정밀도 확보 |
 | 임베딩 파인튜닝 | **보류(조건부)** — Future Work에서 확정 계획 아닌 검토 항목으로 하향 | (1) 파인튜닝이 실제로 고치는 지점(질문↔초록 매칭)은 실증된 문제가 아니라 가설 — 검증 없이 확정하면 이 프로젝트가 지켜온 증거 기반 결정 원칙에 위배. (2) `all-MiniLM-L6-v2`가 이미 QA 스타일 문장쌍 포함 대규모 데이터로 학습돼 이 용도에 이미 준수한 성능일 가능성. **재검토 조건:** #6~#8 완성 후 Evaluation의 "검색 관련도" 지표로 실측해서 실제로 부족하면 그때 착수 |
 
 > 상세 결정 기록은 `docs/decisions.md` (ADR — 결정 시마다 누적)
