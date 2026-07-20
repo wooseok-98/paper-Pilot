@@ -62,3 +62,7 @@ cp .env.example .env   # API 키 입력
 
 ## 문서
 - [docs/architecture.md](docs/architecture.md) — Goals/Non-Goals, Agent Design, Design Decisions
+
+---
+## 회고
+[PaperPilot 회고 벨로그](https://velog.io/@dan9872/series/PaperPilot-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8-multi-agent-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8)
