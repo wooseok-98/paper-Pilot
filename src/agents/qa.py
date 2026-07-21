@@ -1,0 +1,69 @@
+from retriever import retrieve
+from llm import call_llm, call_structured
+
+MAX_RETRIES = 5
+TOP_K = 5
+
+SUFFICIENCY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reason": {"type": "string"},
+        "sufficient": {"type": "boolean"},
+        "rewritten_query": {
+            "type": "string",
+            "description": "부족할 때 다시 검색할 퀴리 (다른 표현, 더 구체적인 용어로 재작성)",
+        },
+    },
+    "required": ["reason", "sufficient", "rewritten_query"],
+}
+
+ANSWER_SYSTEM = (
+    "제공된 논문 초록에 있는 내용만 근거로 답변한다."
+    "초록에 없는 내용은 추측하지 말고 '초록에 없는 내용입니다.'라고 답변한다."
+    "답변에는 근거가 된 논문의 paper_id를 함께 포함한다."
+)
+
+def build_context(papers: list[dict]) -> str:
+    """검색된 논문들을 prompt에 넣을 수 있는 문자열로 변환"""
+    return "\n\n".join(
+        f"[{p['paper_id']}] {p['title']}\n{p['abstract']}" for p in papers
+    )
+
+def check_sufficiency(question: str, papers: list[dict]) -> dict:
+    """검색된 초록으로 질문에 답할 수 있는지 판단 (self-RAG)"""
+    return call_structured(
+        prompt= f"질문: {question}\n\n검색된 논문 초록:\n{build_context(papers)}\n\n"
+                f"이 초록들만으로 질문에 답할 수 있는지 판단해줘.",
+        schema=SUFFICIENCY_SCHEMA,
+    )
+
+def generate_answer(question: str, papers: list[dict]) -> str:
+    """검색된 초록을 근거로 질문에 답변"""
+    return call_llm(
+        prompt= f"질문: {question}\n\n검색된 논문 초록:\n{build_context(papers)}\n\n"
+                f"위 초록들을 근거로 질문에 답변해줘.",
+        system=ANSWER_SYSTEM,
+    )
+
+def answer(question: str, k: int = TOP_K, max_retries: int = MAX_RETRIES) -> dict:
+    """검색 -> 충분석 판단 (부족하면 재검색) -> 근거 기반 답변 생성"""
+    query = question
+    papers = retrieve(query, k=k)
+
+    for _ in range(max_retries):
+        result = check_sufficiency(question, papers)
+        print(f"sufficient={result['sufficient']}, reason={result['reason']}")
+        if result["sufficient"]:
+            return {"answer": generate_answer(question, papers), "papers": papers, "sufficient": True}
+        query = result["rewritten_query"]
+        papers = retrieve(query, k=k)
+
+    return {"answer": "저장된 논문 초록만으로는 질문에 답할 수 없습니다.", "papers": papers, "sufficient": False}
+
+if __name__ == "__main__":
+    result = answer("이미지로부터 사용된 프롬프트를 역추론할 수 있나?")
+    print("\n=== 답변 ===")
+    print(result["answer"])
+    print("\n=== 근거 논문 ===")
+    for p in result["papers"]:
+        print("-", p["paper_id"], p["title"])

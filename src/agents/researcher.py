@@ -76,9 +76,3 @@ def research(query: str, min_results: int = 3, max_retries: int = MAX_RETRIES) -
     count = ingest_papers(relevant)
     print(f"저장된 논문 수: {count} (후보 {len(papers)}개 중)")
     return relevant
-
-
-if __name__ == "__main__":
-    papers = research("stable diffusion image generation")
-    for p in papers:
-        print(p["title"])
