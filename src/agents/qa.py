@@ -59,11 +59,3 @@ def answer(question: str, k: int = TOP_K, max_retries: int = MAX_RETRIES) -> dic
         papers = retrieve(query, k=k)
 
     return {"answer": "저장된 논문 초록만으로는 질문에 답할 수 없습니다.", "papers": papers, "sufficient": False}
-
-if __name__ == "__main__":
-    result = answer("이미지로부터 사용된 프롬프트를 역추론할 수 있나?")
-    print("\n=== 답변 ===")
-    print(result["answer"])
-    print("\n=== 근거 논문 ===")
-    for p in result["papers"]:
-        print("-", p["paper_id"], p["title"])
