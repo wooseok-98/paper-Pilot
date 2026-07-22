@@ -11,7 +11,7 @@ SUFFICIENCY_SCHEMA = {
         "sufficient": {"type": "boolean"},
         "rewritten_query": {
             "type": "string",
-            "description": "부족할 때 다시 검색할 퀴리 (다른 표현, 더 구체적인 용어로 재작성)",
+            "description": "부족할 때 다시 검색할 쿼리 (다른 표현, 더 구체적인 용어로 재작성)",
         },
     },
     "required": ["reason", "sufficient", "rewritten_query"],
@@ -37,16 +37,21 @@ def check_sufficiency(question: str, papers: list[dict]) -> dict:
         schema=SUFFICIENCY_SCHEMA,
     )
 
-def generate_answer(question: str, papers: list[dict]) -> str:
-    """검색된 초록을 근거로 질문에 답변"""
+def generate_answer(question: str, papers: list[dict], feedback: list[str] | None = None) -> str:
+    """검색된 초록을 근거로 질문에 답변 (feedback 있으면 지적사항 반영해 재작성)"""
+    revision = ""
+    if feedback:
+        revision = ("\n\n이전 답변에서 다음 내용이 초록에 근거가 없다고 피드백 받았다.:\n"
+                    + "\n".join(f"- {f}" for f in feedback)
+                    + "\n해당 부분을 제거하거나 '초록에 없는 내용입니다.'로 수정해서 다시 작성해줘.")
     return call_llm(
         prompt= f"질문: {question}\n\n검색된 논문 초록:\n{build_context(papers)}\n\n"
-                f"위 초록들을 근거로 질문에 답변해줘.",
+                f"위 초록들을 근거로 질문에 답변해줘.{revision}",
         system=ANSWER_SYSTEM,
     )
 
 def answer(question: str, k: int = TOP_K, max_retries: int = MAX_RETRIES) -> dict:
-    """검색 -> 충분석 판단 (부족하면 재검색) -> 근거 기반 답변 생성"""
+    """검색 -> 충분성 판단 (부족하면 재검색) -> 근거 기반 답변 생성"""
     query = question
     papers = retrieve(query, k=k)
 
