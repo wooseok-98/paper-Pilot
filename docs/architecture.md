@@ -73,11 +73,13 @@
 
 | 에이전트 | Layer | 자율 행동 | 패턴 |
 | --- | --- | --- | --- |
-| **Orchestrator** | 1 | 의도 분류 → 워커 라우팅 | Routing |
+| **Orchestrator** | 1 | 의도 분류(`enum`으로 `search`/`query` 강제) → 워커 라우팅 | Routing |
 | **Researcher** | 2 | 넓게 검색 후 **논문별 관련성을 채점해 솎아냄**, 통과분 부족하면 후보 확장 후 재필터 | Self-correction / CRAG |
 | **QA** | 2 | 검색된 초록으로 답변 가능한지 판정, 부족하면 **쿼리 재작성 후 재검색** | Self-RAG / CRAG |
 | **Critic** | 3 | 답변이 초록에 실제 근거 있는지 채점, 미근거면 **QA에 재작성 반려** | Reflection / Generator-Critic |
 
+> **Orchestrator 근거:** 자체 자기교정 루프는 없지만, **판단이 그래프 전체의 실행 경로를 바꾸는 분기점**이라 Routing 패턴으로 분류(Comparator가 자기 안에서 정해진 순서만 밟았던 것과 구별됨). JSON Schema `enum: ["search", "query"]`로 값 자체를 강제 — 목록 밖 값이 나오면 그래프가 라우팅 불가하므로 형식(`tool_choice`)에 더해 값까지 제약. **판단 기준 정정:** 초기엔 "이미 수집된 논문인가"로 물었으나 그건 코퍼스 상태라 **질문 문장만으로 알 수 없어** 오분류 발생(질의응답 질문을 `search`로 분류) → **"무엇을 해달라는 요청인가"**(찾아줘 = search / ~할 수 있나? = query)라는 문장에서 관측 가능한 기준으로 교체해 해결
+>
 > **Researcher 자기교정 근거:** arXiv 기본 검색에서 실증한 **반대 방향의 두 실패** — (1) 오염(precision): `"stable diffusion"` 검색 시 재료과학 diffusion 논문 혼입, 20개까지 확장해도 지속. (2) 누락(recall): 원조 논문("High-Resolution Image Synthesis with Latent Diffusion Models")은 20위 안에도 없음(arXiv Relevance 정렬이 유명 논문·인용수를 반영 안 함). **자기교정 지렛대 전환:** 처음엔 "결과 평가 → 쿼리 재작성 후 재검색"으로 설계했으나, LLM이 만든 `NOT ...` 제외 쿼리를 arXiv API가 지원하지 않아 5회 재시도 전부 실패하고 오염된 결과를 저장 → **교정 행동이 도구 능력과 맞아야 작동**한다는 교훈. 쿼리 재작성(arXiv가 무시) 대신 **결과 필터링(우리가 통제)** 으로 전환: 넓게 검색해 잡음을 감수하고, LLM이 논문별 관련성을 채점해 솎아냄(CRAG). 이렇게 하면 대체 쿼리(recall)가 끌어온 잡음도 필터가 청소
 
 > **QA self-RAG 근거:** 검색 한 번 후 무조건 답하면 정적 RAG 함수 — 근거 부족 시 재검색하는 판단 루프가 있어야 에이전트. LLM grader가 **관련성·충분성**을 채점해 재검색 여부 결정. **여기선 쿼리 재작성이 유효한 지렛대** — Researcher(arXiv)와 달리 QA는 우리 FAISS 코퍼스를 검색하므로, 쿼리를 바꾸면 임베딩이 바뀌고 실제로 다른 논문이 반환됨(교정 행동이 결과를 실제로 바꿈). 답변 생성은 `system` 프롬프트로 "제공된 초록에 있는 내용만, 없으면 언급 없음, `paper_id` 표기"를 강제 → Critic이 검증할 기준선을 만듦
@@ -182,6 +184,8 @@
 - **PDF 전문 인덱싱 + 전문 기반 요약** — 심층 질의응답 (Non-Goal에서 승격)
 - **병렬 fan-out (하위주제)** — 넓은 질문을 하위주제로 분해해 Researcher N개 동시 실행 + Synthesizer 병합 (LangGraph `Send` map-reduce)
 - **병렬 fan-out (쿼리 변형)** — Researcher의 대체 쿼리를 1개가 아니라 3~5개 동시 생성해 `Send`로 병렬 검색·병합(Multi-Query Retrieval). 하위주제 fan-out보다 스코프가 작아 `Send` 메커니즘을 먼저 연습해볼 디딤돌로 적합. #6에서 대체 쿼리 1개짜리로 먼저 검증 후, 그래도 누락이 남으면 업그레이드
+- **복합 요청 다단계 처리** — 현재 Orchestrator는 `search`/`query` 중 **하나만** 고르는 라우팅이라 "논문 찾아서 데이터셋 알려줘" 같은 복합 요청은 한쪽으로만 처리됨. 초기 설계의 Supervisor Planning 패턴(다단계 계획)을 되살리면 해결되나 복잡도 대비 MVP 이득 없어 보류
+- **QA → Researcher 폴백** — `query`로 라우팅됐는데 코퍼스에 해당 주제 논문이 없으면 QA가 항복하고 끝남. 항복 시 Researcher로 넘겨 논문을 수집한 뒤 다시 답하는 엣지를 그래프에 추가하면 의도 분류의 근본적 애매함(코퍼스 상태를 문장만으로 알 수 없음)을 실행 단계에서 보완 가능
 - **Comparator 부활** — 비교표 빈칸 감지 시 추가 검색하는 자기교정 루프 부여
 - 다중 소스 폴백 (Semantic Scholar — 인용 그래프 확보)
 - **임베딩 모델 파인튜닝 (조건부)** — Design Decisions 참고. #6~#8 완성 후 "검색 관련도" 지표로 실측해서 질문↔초록 매칭이 실제로 부족할 때만 착수. 착수 시: `all-MiniLM-L6-v2`를 `sentence-transformers` `MultipleNegativesRankingLoss`로 파인튜닝, 학습 데이터는 `call_llm()`으로 초록마다 합성 질문 생성(질문=anchor, 초록=positive) — 실제 추론 시나리오(질문→초록)와 형태 일치. (제목,초록) 쌍은 보조로만. 검증은 동일 지표로 전/후 비교

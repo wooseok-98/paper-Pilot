@@ -9,7 +9,7 @@ GROUNDING_SCHEMA = {
         "issues":{
             "type": "array",
             "items": {"type": "string"},
-            "description": "답변에서 제공된 초록에 근거가 없는 주장들 (모드 근거가 있으면 빈 배열을)",
+            "description": "답변에서 제공된 초록에 근거가 없는 주장들 (모두 근거가 있으면 빈 배열을)",
         },
         "grounded": {"type": "boolean"},
     },
