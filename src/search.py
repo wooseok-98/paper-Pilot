@@ -9,7 +9,7 @@ def search_papers(query: str, max_results: int = 10) -> list[dict]:
         sort_by=arxiv.SortCriterion.Relevance,
     )
     papers = []
-    for r in arxiv.Client().results(search):
+    for r in arxiv.Client(delay_seconds=3, num_retries=3).results(search):
         papers.append({
             "paper_id": r.entry_id.split("/")[-1],   # arXiv ID
             "title": r.title,
