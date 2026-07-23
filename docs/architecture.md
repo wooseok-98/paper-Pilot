@@ -135,6 +135,32 @@
 
 ---
 
+## Graph 배선 (`graph.py`)
+
+위 흐름을 LangGraph `StateGraph`로 구현. 공유 `State`가 노드를 관통하며 채워지고, 조건부 엣지가 라우팅·사이클을 표현.
+
+```
+START → orchestrator ─(intent)─┬─ search → researcher → END
+                               └─ query  → retrieve → check_sufficiency ─(sufficient?)─┐
+                                              ▲                                         │
+              (재검색: 재료를 새로) rewrite_query ◄── 부족·재시도<max                   │ 충분
+                                                                                        ▼
+                                             generate_answer → critic ─(grounded?)─┬─ 근거O → END
+                                                    ▲                              │
+                          (재생성: issues 피드백) ───┴──── 미근거·재시도<max ◄───────┘
+                                                    │
+                         (양쪽 상한 소진) ──────────→ give_up → END
+```
+
+**설계 결정:**
+- **에이전트마다 노드화 정도가 다름** — QA는 self-RAG 사이클이 Critic 사이클과 얽혀 있어 **4개 노드로 펼침**(retrieve·check_sufficiency·rewrite_query·generate_answer), Researcher는 내부 CRAG 루프가 독립적이라 **통째로 1노드**. 기준: "다른 에이전트와 사이클로 얽히면 펼치고, 자기 안에서만 돌면 통째로 둔다"
+- **제어 흐름을 전부 그래프로** — `qa.answer()` 함수 안 for문에 숨어 있던 self-RAG 루프를 그래프 엣지로 끄집어냄. 재시도 카운터(`search_retries`·`critic_retries`)를 State 필드로 노출해 라우팅이 종료를 판단
+- **제어권은 그래프에 있음(ReAct 아님)** — LLM에게 도구 선택을 맡기지 않고, 각 노드에서 명시적으로 도구/LLM을 호출. 예측 가능성·디버깅 우선
+- **`give_up` 항복 노드** — 두 사이클의 상한 소진을 한 노드로 모으되, 노드 안에서 `sufficient` 값을 읽어 사유(`insufficient`/`ungrounded`)를 구분. 노드를 늘리지 않고 사유는 데이터(`give_up_reason`)로 남김
+- **접착제(glue) 노드** — `rewrite_query`는 LLM·도구 호출 없이 State만 조작(제안→확정 승격 + 카운터 증가). 라우팅 함수는 State를 못 바꾸므로 카운터 증가는 노드가 담당
+
+---
+
 ## Tech Stack
 
 | 영역 | 선택 |

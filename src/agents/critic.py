@@ -1,5 +1,5 @@
 from llm import call_structured
-from qa import build_context
+from agents.qa import build_context
 
 MAX_RETRIES = 3
 
