@@ -1,0 +1,50 @@
+[
+  {
+    "id": "blended-region",
+    "kind": "answerable",
+    "question": "Blended Latent Diffusion은 이미지의 어느 영역을 편집하나?",
+    "papers": [
+      {
+        "paper_id": "2206.02779v2",
+        "title": "Blended Latent Diffusion",
+        "abstract": "We present an accelerated solution to the task of local text-driven editing of generic images, where the desired edits are confined to a user-provided mask. Our solution leverages a recent text-to-image Latent Diffusion Model (LDM), which speeds up diffusion by operating in a lower-dimensional latent space."
+      }
+    ]
+  },
+  {
+    "id": "qdiff-bits",
+    "kind": "answerable",
+    "question": "Q-Diffusion은 모델을 몇 비트로 양자화하나?",
+    "papers": [
+      {
+        "paper_id": "2302.04304v3",
+        "title": "Q-Diffusion: Quantizing Diffusion Models",
+        "abstract": "Our method quantizes full-precision diffusion models into 4-bit in a training-free manner, and can run stable diffusion in 4-bit weights with high generation quality for the first time."
+      }
+    ]
+  },
+  {
+    "id": "smooth-training-cost",
+    "kind": "unanswerable",
+    "question": "Smooth Diffusion 학습에는 GPU가 몇 대 사용되었나?",
+    "papers": [
+      {
+        "paper_id": "2312.04410v1",
+        "title": "Smooth Diffusion",
+        "abstract": "We propose Smooth Diffusion, a new category of diffusion models that can be simultaneously high-performing and smooth. We introduce Step-wise Variation Regularization and devise an interpolation standard deviation (ISTD) metric to assess latent space smoothness."
+      }
+    ]
+  },
+  {
+    "id": "blended-authors",
+    "kind": "unanswerable",
+    "question": "Blended Latent Diffusion 논문 저자들의 소속 기관은 어디인가?",
+    "papers": [
+      {
+        "paper_id": "2206.02779v2",
+        "title": "Blended Latent Diffusion",
+        "abstract": "We present an accelerated solution to the task of local text-driven editing of generic images, where the desired edits are confined to a user-provided mask. Our solution leverages a recent text-to-image Latent Diffusion Model (LDM)."
+      }
+    ]
+  }
+]

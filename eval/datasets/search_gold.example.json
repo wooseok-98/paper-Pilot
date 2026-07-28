@@ -1,0 +1,37 @@
+[
+  {
+    "topic": "stable diffusion",
+    "query": "stable diffusion",
+    "alt_query": "latent diffusion model",
+    "candidates": [
+      {
+        "paper_id": "2112.10752",
+        "title": "High-Resolution Image Synthesis with Latent Diffusion Models",
+        "abstract": "(초록 생략) 원조 Latent Diffusion 논문",
+        "source": "alt",
+        "relevant": true
+      },
+      {
+        "paper_id": "2307.01952",
+        "title": "SDXL: Improving Latent Diffusion Models for High-Resolution Image Synthesis",
+        "abstract": "(초록 생략)",
+        "source": "base",
+        "relevant": true
+      },
+      {
+        "paper_id": "2010.02502",
+        "title": "Denoising Diffusion Implicit Models",
+        "abstract": "(초록 생략)",
+        "source": "both",
+        "relevant": true
+      },
+      {
+        "paper_id": "1912.00000",
+        "title": "Diffusion of Innovations in Materials Science",
+        "abstract": "(초록 생략) diffusion이라는 단어만 같은 재료과학 논문 — 오염",
+        "source": "base",
+        "relevant": false
+      }
+    ]
+  }
+]

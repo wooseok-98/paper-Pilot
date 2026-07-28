@@ -1,0 +1,90 @@
+[
+  {
+    "id": "blended-clean",
+    "kind": "clean",
+    "papers": [
+      {
+        "paper_id": "2206.02779v2",
+        "title": "Blended Latent Diffusion",
+        "abstract": "We present an accelerated solution to the task of local text-driven editing of generic images, where the desired edits are confined to a user-provided mask. Our solution leverages a recent text-to-image Latent Diffusion Model (LDM), which speeds up diffusion by operating in a lower-dimensional latent space. Our method achieves better precision than the baselines while mitigating some of their artifacts."
+      }
+    ],
+    "answer": "Blended Latent Diffusion은 사용자가 제공한 마스크 영역에 국한된 텍스트 기반 이미지 편집을 수행한다. 저차원 latent space에서 diffusion을 수행하는 LDM을 활용해 속도를 높이며, baseline보다 정밀도가 높다. [2206.02779v2]",
+    "planted_claims": []
+  },
+  {
+    "id": "blended-hallucinated",
+    "kind": "hallucinated",
+    "papers": [
+      {
+        "paper_id": "2206.02779v2",
+        "title": "Blended Latent Diffusion",
+        "abstract": "We present an accelerated solution to the task of local text-driven editing of generic images, where the desired edits are confined to a user-provided mask. Our solution leverages a recent text-to-image Latent Diffusion Model (LDM), which speeds up diffusion by operating in a lower-dimensional latent space. Our method achieves better precision than the baselines while mitigating some of their artifacts."
+      }
+    ],
+    "answer": "Blended Latent Diffusion은 마스크 영역에 국한된 텍스트 기반 이미지 편집을 수행한다. baseline 대비 정밀도가 37% 향상되었으며, 2022년 CVPR Best Paper를 수상했다. 저자들은 Google Research 소속이다. [2206.02779v2]",
+    "planted_claims": [
+      "정밀도가 37% 향상 (구체적 수치는 초록에 없음)",
+      "2022년 CVPR Best Paper 수상 (초록에 없음)",
+      "저자가 Google Research 소속 (초록에 없음)"
+    ]
+  },
+  {
+    "id": "smooth-clean",
+    "kind": "clean",
+    "papers": [
+      {
+        "paper_id": "2312.04410v1",
+        "title": "Smooth Diffusion",
+        "abstract": "We propose Smooth Diffusion, a new category of diffusion models that can be simultaneously high-performing and smooth. We introduce Step-wise Variation Regularization to enforce that the proportion between the variations of an input latent and the output image is constant. In addition, we devise an interpolation standard deviation (ISTD) metric to assess latent space smoothness. Smooth Diffusion is implemented as a plug-and-play Smooth-LoRA."
+      }
+    ],
+    "answer": "Smooth Diffusion은 성능과 latent space의 매끄러움을 동시에 달성하는 diffusion 모델이다. Step-wise Variation Regularization으로 입력 latent 변화와 출력 이미지 변화의 비율을 일정하게 유지하며, 매끄러움 평가를 위해 ISTD 지표를 제안한다. plug-and-play Smooth-LoRA로 구현된다. [2312.04410v1]",
+    "planted_claims": []
+  },
+  {
+    "id": "smooth-hallucinated",
+    "kind": "hallucinated",
+    "papers": [
+      {
+        "paper_id": "2312.04410v1",
+        "title": "Smooth Diffusion",
+        "abstract": "We propose Smooth Diffusion, a new category of diffusion models that can be simultaneously high-performing and smooth. We introduce Step-wise Variation Regularization to enforce that the proportion between the variations of an input latent and the output image is constant. In addition, we devise an interpolation standard deviation (ISTD) metric to assess latent space smoothness. Smooth Diffusion is implemented as a plug-and-play Smooth-LoRA."
+      }
+    ],
+    "answer": "Smooth Diffusion은 latent space를 매끄럽게 만드는 diffusion 모델이며, Step-wise Variation Regularization을 사용한다. 학습에는 8대의 A100 GPU로 5일이 소요되었고, FID 2.1을 달성했다. [2312.04410v1]",
+    "planted_claims": [
+      "8대의 A100 GPU로 5일 학습 (초록에 없음)",
+      "FID 2.1 달성 (초록에 없음)"
+    ]
+  },
+  {
+    "id": "qdiff-clean",
+    "kind": "clean",
+    "papers": [
+      {
+        "paper_id": "2302.04304v3",
+        "title": "Q-Diffusion: Quantizing Diffusion Models",
+        "abstract": "We propose a novel post-training quantization (PTQ) method tailored to diffusion models, which compresses the noise estimation network to accelerate the generation process. Our method quantizes full-precision diffusion models into 4-bit in a training-free manner, and can run stable diffusion in 4-bit weights with high generation quality for the first time."
+      }
+    ],
+    "answer": "Q-Diffusion은 diffusion 모델을 위한 학습이 필요 없는(training-free) 사후 양자화(PTQ) 기법으로, noise estimation network를 압축해 생성 속도를 높인다. 모델을 4-bit로 양자화하며, stable diffusion을 4-bit 가중치로 실행할 수 있다. [2302.04304v3]",
+    "planted_claims": []
+  },
+  {
+    "id": "qdiff-hallucinated",
+    "kind": "hallucinated",
+    "papers": [
+      {
+        "paper_id": "2302.04304v3",
+        "title": "Q-Diffusion: Quantizing Diffusion Models",
+        "abstract": "We propose a novel post-training quantization (PTQ) method tailored to diffusion models, which compresses the noise estimation network to accelerate the generation process. Our method quantizes full-precision diffusion models into 4-bit in a training-free manner, and can run stable diffusion in 4-bit weights with high generation quality for the first time."
+      }
+    ],
+    "answer": "Q-Diffusion은 diffusion 모델을 4-bit로 양자화하는 training-free PTQ 기법이다. NVIDIA와 공동 개발되었으며, 2023년 ICCV에 게재되었다. [2302.04304v3]",
+    "planted_claims": [
+      "NVIDIA와 공동 개발 (초록에 없음)",
+      "2023년 ICCV 게재 (초록에 없음)"
+    ]
+  }
+]

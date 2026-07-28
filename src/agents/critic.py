@@ -1,8 +1,6 @@
 from llm import call_structured
 from agents.qa import build_context
 
-MAX_RETRIES = 3
-
 GROUNDING_SCHEMA = {
     "type": "object",
     "properties": {
