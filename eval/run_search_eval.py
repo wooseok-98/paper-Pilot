@@ -38,6 +38,13 @@ def eval_topic(g: dict) -> dict:
     filtered = filter_relevant(g["query"], candidates)
     kept_ids = [p["paper_id"] for p in filtered]
 
+    # 진단: 통과했지만 무관인 논문 (오답 통과 = 필터가 놓친 오염)
+    false_positives = [p for p in filtered if not p["relevant"]]
+
+    # 진단: 관련인데 버려진 논문 (오답 탈락 = 필터가 과잉 제거)
+    kept_set = set(kept_ids)
+    false_negatives = [c for c in candidates if c["relevant"] and c["paper_id"] not in kept_set]
+
     # (2) 대체쿼리 recall 기여 — 원본이 놓쳤는데 대체가 건진 관련 논문
     alt_gain = [c["paper_id"] for c in candidates if c["relevant"] and c["source"] == "alt"]
 
@@ -50,6 +57,8 @@ def eval_topic(g: dict) -> dict:
         "on_r": recall(kept_ids, relevant_ids),       # 필터가 관련 논문을 얼마나 유지했나
         "on_f1": f1(kept_ids, relevant_ids),
         "alt_gain": len(alt_gain),
+        "false_positives": false_positives,           # 진단용: 오답 통과 (오염)
+        "false_negatives": false_negatives,           # 진단용: 오답 탈락 (과잉 제거)
     }
 
 
@@ -70,6 +79,18 @@ def main():
     print("\n[요약]")
     print(f"  필터 효과   : 평균 precision {avg_off:.2f} → {avg_on:.2f}  ({avg_on - avg_off:+.2f})")
     print(f"  대체쿼리 기여: 원본이 놓친 관련 논문 {total_alt}개를 추가 확보")
+
+    # 진단: 필터가 놓친 오염 (프롬프트를 어떻게 조일지 단서)
+    print("\n[진단] 통과했지만 무관인 논문 (오답 통과 = 오염):")
+    for r in rows:
+        for p in r["false_positives"]:
+            print(f"  - [{p['source']}] {p['title']}")
+
+    # 진단: 관련인데 버려진 논문 (프롬프트가 과잉 제거하는지 단서)
+    print("\n[진단] 관련인데 버려진 논문 (오답 탈락 = 과잉 제거):")
+    for r in rows:
+        for p in r["false_negatives"]:
+            print(f"  - [{p['source']}] {p['title']}")
 
 
 if __name__ == "__main__":
