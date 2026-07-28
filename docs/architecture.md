@@ -143,11 +143,11 @@
 START → orchestrator ─(intent)─┬─ search → researcher → END
                                └─ query  → retrieve → check_sufficiency ─(sufficient?)─┐
                                               ▲                                         │
-              (재검색: 재료를 새로) rewrite_query ◄── 부족·재시도<max                   │ 충분
+              (재검색: 재료를 새로) rewrite_query ◄── 부족·재시도<max                           │ 충분
                                                                                         ▼
                                              generate_answer → critic ─(grounded?)─┬─ 근거O → END
                                                     ▲                              │
-                          (재생성: issues 피드백) ───┴──── 미근거·재시도<max ◄───────┘
+                          (재생성: issues 피드백) ─────┴──────── 미근거·재시도<max ◄──────┘
                                                     │
                          (양쪽 상한 소진) ──────────→ give_up → END
 ```
@@ -213,7 +213,7 @@ START → orchestrator ─(intent)─┬─ search → researcher → END
 - **복합 요청 다단계 처리** — 현재 Orchestrator는 `search`/`query` 중 **하나만** 고르는 라우팅이라 "논문 찾아서 데이터셋 알려줘" 같은 복합 요청은 한쪽으로만 처리됨. 초기 설계의 Supervisor Planning 패턴(다단계 계획)을 되살리면 해결되나 복잡도 대비 MVP 이득 없어 보류
 - **QA → Researcher 폴백** — `query`로 라우팅됐는데 코퍼스에 해당 주제 논문이 없으면 QA가 항복하고 끝남. 항복 시 Researcher로 넘겨 논문을 수집한 뒤 다시 답하는 엣지를 그래프에 추가하면 의도 분류의 근본적 애매함(코퍼스 상태를 문장만으로 알 수 없음)을 실행 단계에서 보완 가능
 - **Comparator 부활** — 비교표 빈칸 감지 시 추가 검색하는 자기교정 루프 부여
-- 다중 소스 폴백 (Semantic Scholar — 인용 그래프 확보)
+- **Semantic Scholar 인용 그래프 큐레이션 (v2)** — "분야 원논문 + 중요 파생 논문 찾아줘" 요청 대응. arXiv는 인용·중요도 신호가 없어 원조 논문이 검색 상위에 안 떠 이 목표를 못 이룸 → S2의 인용수·인용 그래프로 앵커→조상(원논문)·후손(중요 파생)을 큐레이션. `src/scholar.py` 클라이언트까지 프로토타입했으나 **에이전트 완성(데모·서빙·배포) 우선** + S2 무인증 rate limit 리스크 대비 포트폴리오 이득이 낮아 **v2로 스코프 아웃**. 착수 시 arXiv 검색을 S2로 교체(`paper_id`도 S2 ID로 통일)
 - **임베딩 모델 파인튜닝 (조건부)** — Design Decisions 참고. #6~#8 완성 후 "검색 관련도" 지표로 실측해서 질문↔초록 매칭이 실제로 부족할 때만 착수. 착수 시: `all-MiniLM-L6-v2`를 `sentence-transformers` `MultipleNegativesRankingLoss`로 파인튜닝, 학습 데이터는 `call_llm()`으로 초록마다 합성 질문 생성(질문=anchor, 초록=positive) — 실제 추론 시나리오(질문→초록)와 형태 일치. (제목,초록) 쌍은 보조로만. 검증은 동일 지표로 전/후 비교
 - **FastAPI 서빙** — 그래프 완성·CLI 검증 후, Router-Controller를 얇은 어댑터로 씌워 HTTP API화. `graph.astream()`으로 에이전트 중간 진행 상황(검색 중/검증 중 등) 스트리밍 고려
 - **코퍼스 누적** — 현재 `ingest_papers`는 매번 새 인덱스를 만들어 덮어씀 → 새 주제를 조사하면 이전 논문이 사라짐. `faiss.read_index()`로 기존 인덱스에 `add`하고 메타데이터도 이어붙이도록 수정 필요 (MVP 검증엔 지장 없어 후순위)

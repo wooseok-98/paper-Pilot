@@ -39,8 +39,8 @@
 
 ## 프로젝트 구조
 ```
-app.py              # FastAPI 진입점 (Router-Controller)
 src/
+├── main.py         # CLI 진입점 (graph.invoke)
 ├── search.py       # arXiv 검색
 ├── embedding.py    # 문장 → 벡터
 ├── ingest.py       # 임베딩 → FAISS 저장
@@ -52,6 +52,9 @@ src/
     ├── researcher.py
     ├── qa.py
     └── critic.py
+eval/               # 평가 하네스 (검색·Critic·QA scorecard)
+tests/              # 유닛·통합 테스트 (pytest)
+app.py              # FastAPI 진입점 (예정 — Phase 2)
 ```
 
 ## 실행
