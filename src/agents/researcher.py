@@ -69,10 +69,13 @@ def research(query: str, min_results: int = 3, max_retries: int = MAX_RETRIES) -
 
     retries = 0
     while len(relevant) < min_results and retries < max_retries:
-        papers = merge_by_paper_id(papers, search_papers(query, 20))
+        papers = merge_by_paper_id(papers, search_papers(query, 20 * (retries + 2)))
         relevant = filter_relevant(query, papers)
         retries += 1
 
     count = ingest_papers(relevant)
-    print(f"저장된 논문 수: {count} (후보 {len(papers)}개 중)")
+    print(
+        f"alt_query='{alt_query}' | 후보 {len(papers)}개 -> 필터 통과 {len(relevant)}개"
+        f" (재검색 {retries}회) | 코퍼스 총 {count}편"
+    )
     return relevant

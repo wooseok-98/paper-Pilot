@@ -28,6 +28,7 @@ def call_structured(prompt: str, schema: dict, system: str = "") -> dict:
     response = _client.messages.create(
         model=MODEL,
         max_tokens=1024,
+        temperature=0,
         system=system,
         messages=[{"role": "user", "content": prompt}],
         tools=[tool],
