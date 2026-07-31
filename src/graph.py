@@ -7,8 +7,9 @@ from agents.researcher import research
 from agents.qa import check_sufficiency, generate_answer
 from agents.critic import check_grounding
 from retriever import retrieve
+from search import SearchUnavailable
 
-MAX_RETRIES = 3
+MAX_RETRIES = 3    # 쿼리 재작성·답변 재생성 공통 상한
 TOP_K = 5
 
 
@@ -24,8 +25,8 @@ class State(TypedDict, total=False):
     grounded: bool                  # 생성된 답변이 초록에 근거하는지 여부 (critic 판단)
     search_retries: int
     critic_retries: int
-    gave_up: bool                   # 상한 도달로 포기했는지 여부
-    give_up_reason: str             # 포기 사유 (초록 불충분 / 답변 근거 없음)
+    gave_up: bool                   # 답변을 만들지 못하고 종료했는지 여부 (상한 도달 / 외부 장애)
+    give_up_reason: str             # 포기 사유 (초록 불충분 / 답변 근거 없음 / arXiv 장애)
 
 
 # [노드]
@@ -36,7 +37,16 @@ def orchestrator_node(state: State) -> dict:
 
 # Search: 논문 검색+저장
 def researcher_node(state: State) -> dict:
-    return {"papers": research(state["question"])}
+    try:
+        return {"papers": research(state["question"])}
+    except SearchUnavailable:
+        return {
+            "papers": [],
+            "gave_up": True,
+            "give_up_reason": "search_unavailable",
+            "answer": "arXiv 검색 서비스에 일시적으로 접근할 수 없습니다. 잠시 후 다시 시도해주세요.",
+        }
+
 
 # QA: 질문 답에 필요한 논문 리스트에서 검색
 def retrieve_node(state: State) -> dict:
@@ -72,10 +82,10 @@ def critic_node(state: State) -> dict:
 def give_up_node(state: State) -> dict:
     if not state.get("sufficient"):
         reason = "insufficient"
-        answer = "관련 논문을 찾지 못했습니다. 해당 주제의 논문을 먼저 검색해주세요."
+        answer = "검색된 논문의 초록에서 질문에 답할 근거를 찾지 못했습니다."
     else:
         reason = "ungrounded"
-        answer = "근거를 갖춘 답변을 생성하지 못했습니다. 질문을 더 구체적으로 해주세요."
+        answer = "초록에 근거한 답변을 생성하지 못해 답변을 보류합니다."
     return {"gave_up": True, "give_up_reason": reason, "answer": answer}
 
 

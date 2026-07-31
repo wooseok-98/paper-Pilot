@@ -2,7 +2,18 @@ from search import search_papers
 from ingest import ingest_papers
 from llm import call_structured
 
-MAX_RETRIES = 5
+MAX_RESEARCH_RETRIES = 2
+
+KEYWORD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "keyword": {
+            "type": "string",
+            "description": "arXiv 검색에 넣을 영어 기술 키워드 (문장이 아니라 2~5단어 검색어)",
+        }
+    },
+    "required": ["keyword"],
+}
 
 EXPAND_SCHEMA = {
     "type": "object",
@@ -26,6 +37,17 @@ FILTER_SCHEMA = {
     },
     "required": ["relevant_ids"],
 }
+
+
+def to_search_keyword(question: str) -> str:
+    """사용자 요청 문장에서 arXiv 검색용 영어 키워드를 추출"""
+    result = call_structured(
+        prompt=f"사용자 요청: {question}\n\n"
+               f"이 요청에서 찾으려는 논문 주제를 arXiv 검색에 넣을 영어 기술 키워드로 만들어줘. "
+               f"문장이 아니라 검색어 형태로. 예: '확산 모델 논문 찾아줘' -> 'diffusion model'",
+        schema=KEYWORD_SCHEMA,
+    )
+    return result["keyword"]
 
 
 def expand_query(query: str) -> str:
@@ -61,21 +83,22 @@ def filter_relevant(query: str, papers: list[dict]) -> list[dict]:
     return [p for p in papers if p["paper_id"] in keep]
 
 
-def research(query: str, min_results: int = 3, max_retries: int = MAX_RETRIES) -> list[dict]:
+def research(query: str, min_results: int = 3, max_retries: int = MAX_RESEARCH_RETRIES) -> list[dict]:
     """넓게 검색(recall) -> 관련성 필터(precision) -> 부족하면 더 검색 -> 저장"""
-    alt_query = expand_query(query)
-    papers = merge_by_paper_id(search_papers(query, 10), search_papers(alt_query, 10))
-    relevant = filter_relevant(query, papers)
+    keyword = to_search_keyword(query)
+    alt_query = expand_query(keyword)
+    papers = merge_by_paper_id(search_papers(keyword, 10), search_papers(alt_query, 10))
+    relevant = filter_relevant(keyword, papers)
 
     retries = 0
     while len(relevant) < min_results and retries < max_retries:
-        papers = merge_by_paper_id(papers, search_papers(query, 20 * (retries + 2)))
-        relevant = filter_relevant(query, papers)
+        papers = merge_by_paper_id(papers, search_papers(keyword, 20 * (retries + 2)))
+        relevant = filter_relevant(keyword, papers)
         retries += 1
 
     count = ingest_papers(relevant)
     print(
-        f"alt_query='{alt_query}' | 후보 {len(papers)}개 -> 필터 통과 {len(relevant)}개"
+        f"keyword='{keyword}' | alt_query='{alt_query}' | 후보 {len(papers)}개 -> 필터 통과 {len(relevant)}개"
         f" (재검색 {retries}회) | 코퍼스 총 {count}편"
     )
     return relevant
