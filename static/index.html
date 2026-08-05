@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaperPilot — 논문 검색·질의응답 멀티 에이전트</title>
+<style>
+  :root {
+    --bg: #fbfbfd;
+    --surface: #ffffff;
+    --border: #e3e5ea;
+    --text: #1b1d22;
+    --muted: #6b7280;
+    --accent: #3b5bdb;
+    --accent-soft: #eef1fd;
+    --ok: #2f855a;
+    --ok-soft: #e8f5ee;
+    --warn: #b45309;
+    --warn-soft: #fdf3e3;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --surface: #1c1f25;
+      --border: #2c313a;
+      --text: #e8eaee;
+      --muted: #9099a6;
+      --accent: #7d95f5;
+      --accent-soft: #242b45;
+      --ok: #6ee7a8;
+      --ok-soft: #1c2f26;
+      --warn: #f0b866;
+      --warn-soft: #33281a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }   /* display:flex 등이 덮어쓰지 않게 */
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", sans-serif;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 840px; margin: 0 auto; padding: 40px 20px 80px; }
+
+  /* ── 헤더 ── */
+  header { margin-bottom: 28px; }
+  .head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  h1 { font-size: 1.6rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .tagline { color: var(--muted); font-size: 0.93rem; margin: 0 0 16px; }
+
+  /* ── 인증 (헤더 우측 칩 + 접히는 패널) ── */
+  .auth-chip {
+    flex-shrink: 0; margin-top: 4px; cursor: pointer;
+    font: inherit; font-size: 0.76rem; font-weight: 600;
+    border-radius: 999px; padding: 4px 12px;
+    border: 1px solid transparent; white-space: nowrap;
+    background: var(--warn-soft); color: var(--warn);
+  }
+  .auth-chip.ok { background: var(--ok-soft); color: var(--ok); }
+  .auth-chip:hover { filter: brightness(0.96); }
+
+  .auth-panel {
+    margin: 12px 0 16px; padding: 14px 16px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .auth-panel .row { margin-top: 0; }
+  .auth-panel .hint { margin: 9px 0 0; font-size: 0.76rem; color: var(--muted); }
+  button.ghost {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 16px; font: inherit; font-size: 0.88rem; cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── 파이프라인 도식 (ASCII 정렬 대신 레이아웃으로) ── */
+  .pipeline {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: 0.8rem;
+  }
+  .node {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 3px 10px; white-space: nowrap; color: var(--muted);
+  }
+  .node.lead { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 600; }
+  .arrow { color: var(--muted); }
+  .branch {
+    display: flex; flex-direction: column; gap: 8px;
+    border-left: 2px solid var(--border); padding-left: 14px;
+  }
+  .path { position: relative; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .path::before {
+    content: ""; position: absolute; left: -14px; top: 50%;
+    width: 12px; height: 2px; background: var(--border);
+  }
+  .tag {
+    font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+    border-radius: 5px; padding: 2px 7px;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .loop { color: var(--accent); font-size: 0.9em; }
+
+  /* ── 입력 ── */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px;
+  }
+  textarea {
+    width: 100%; min-height: 78px; resize: vertical;
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 11px 13px; font: inherit; font-size: 0.97rem;
+  }
+  textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
+  .chip {
+    font-size: 0.79rem; color: var(--muted); cursor: pointer;
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 11px; font-family: inherit;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+  input[type="password"] {
+    flex: 1 1 200px; min-width: 0;
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; font: inherit; font-size: 0.88rem;
+  }
+  button.primary {
+    background: var(--accent); color: #fff; border: 0;
+    border-radius: 8px; padding: 10px 22px;
+    font: inherit; font-weight: 600; font-size: 0.92rem; cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.55; cursor: default; }
+
+  /* ── 상태 ── */
+  .status {
+    margin-top: 18px; font-size: 0.88rem; color: var(--muted);
+    display: flex; align-items: center; gap: 9px;
+  }
+  .status.done { color: var(--ok); }
+  .spinner {
+    width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite; flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .check { font-weight: 700; }
+
+  /* ── 결과 ── */
+  #result { margin-top: 22px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+  .badge {
+    font-family: var(--mono); font-size: 0.74rem;
+    border-radius: 6px; padding: 4px 9px;
+    border: 1px solid var(--border); color: var(--muted);
+  }
+  .badge.intent { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 600; }
+  .badge.ok     { background: var(--ok-soft);     color: var(--ok);     border-color: transparent; }
+  .badge.warn   { background: var(--warn-soft);   color: var(--warn);   border-color: transparent; }
+
+  .answer h1, .answer h2, .answer h3 { font-size: 1.02rem; margin: 20px 0 8px; }
+  .answer p  { margin: 10px 0; }
+  .answer ul { margin: 10px 0; padding-left: 20px; }
+  .answer li { margin: 4px 0; }
+  .answer code {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--accent-soft); border-radius: 4px; padding: 1px 5px;
+  }
+  .cite {
+    font-family: var(--mono); font-size: 0.8em; text-decoration: none;
+    color: var(--accent); background: var(--accent-soft);
+    border-radius: 4px; padding: 1px 5px; white-space: nowrap;
+  }
+  .cite:hover { text-decoration: underline; }
+
+  .papers { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
+  .papers h2 { font-size: 0.8rem; color: var(--muted); margin: 0 0 10px; font-weight: 600; letter-spacing: 0.02em; }
+  .paper { display: block; text-decoration: none; color: inherit; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .paper:last-child { border-bottom: 0; }
+  .paper:hover .paper-title { color: var(--accent); }
+  .paper-id { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); }
+  .paper-title { font-size: 0.9rem; margin-top: 1px; }
+
+  .notice { border-radius: 10px; padding: 14px 16px; font-size: 0.91rem; }
+  .notice.warn, .notice.error { background: var(--warn-soft); color: var(--warn); }
+
+  footer { margin-top: 40px; font-size: 0.79rem; color: var(--muted); }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="head-row">
+      <div>
+        <h1>PaperPilot</h1>
+        <p class="tagline">arXiv 논문을 수집하고, 초록을 근거로 답변하는 순차 멀티 에이전트</p>
+      </div>
+      <button id="authChip" class="auth-chip">토큰 필요</button>
+    </div>
+
+    <div id="authPanel" class="auth-panel" hidden>
+      <div class="row">
+        <input id="token" type="password" placeholder="API 토큰 (X-API-Token)" autocomplete="off">
+        <button id="saveToken" class="ghost">저장</button>
+      </div>
+      <p class="hint">브라우저에만 저장되며, 요청할 때 <code>X-API-Token</code> 헤더로 전송됩니다</p>
+    </div>
+
+    <div class="pipeline">
+      <span class="node">질문</span>
+      <span class="arrow">→</span>
+      <span class="node lead">Orchestrator</span>
+      <div class="branch">
+        <div class="path">
+          <span class="tag">search</span>
+          <span class="arrow">→</span>
+          <span class="node">Researcher <span class="loop">⟳</span></span>
+          <span class="arrow">→</span>
+          <span class="node">코퍼스 저장</span>
+        </div>
+        <div class="path">
+          <span class="tag">query</span>
+          <span class="arrow">→</span>
+          <span class="node">QA <span class="loop">⟳</span></span>
+          <span class="arrow">→</span>
+          <span class="node">Critic <span class="loop">⟳</span></span>
+          <span class="arrow">→</span>
+          <span class="node">답변</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="card">
+    <textarea id="q" placeholder="논문을 찾아달라고 하거나, 수집된 논문에 대해 질문하세요"></textarea>
+
+    <div class="examples">
+      <button class="chip" data-q="확산 모델은 어떻게 이미지를 생성하나?">확산 모델은 어떻게 이미지를 생성하나?</button>
+      <button class="chip" data-q="확산 모델의 추론 속도를 높이는 방법은?">확산 모델의 추론 속도를 높이는 방법은?</button>
+      <button class="chip" data-q="diffusion model 논문 찾아줘">diffusion model 논문 찾아줘 (검색)</button>
+    </div>
+
+    <div class="row">
+      <button id="go" class="primary">질문하기</button>
+    </div>
+  </div>
+
+  <div id="status" class="status" hidden></div>
+  <div id="result"></div>
+
+  <footer>
+    <a href="/docs">API 문서</a> · 초록(abstract) 기반 MVP · 코퍼스에 없는 주제는 환각 대신 정직하게 항복합니다
+  </footer>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const qEl = $("#q"), tokenEl = $("#token"), goEl = $("#go");
+const statusEl = $("#status"), resultEl = $("#result");
+const authChip = $("#authChip"), authPanel = $("#authPanel");
+
+/* ── 인증: 토큰은 브라우저에만 보관, 없을 때만 패널을 펼침 ── */
+tokenEl.value = localStorage.getItem("pp_token") || "";
+syncAuth();
+if (!tokenEl.value) authPanel.hidden = false;   // 처음 방문이면 안내
+
+function syncAuth() {
+  const has = tokenEl.value.trim().length > 0;
+  authChip.textContent = has ? "인증됨" : "토큰 필요";
+  authChip.classList.toggle("ok", has);
+}
+
+authChip.addEventListener("click", () => {
+  authPanel.hidden = !authPanel.hidden;
+  if (!authPanel.hidden) tokenEl.focus();
+});
+
+$("#saveToken").addEventListener("click", saveToken);
+tokenEl.addEventListener("keydown", (e) => { if (e.key === "Enter") saveToken(); });
+
+function saveToken() {
+  localStorage.setItem("pp_token", tokenEl.value.trim());
+  syncAuth();
+  authPanel.hidden = true;
+}
+
+document.querySelectorAll(".chip").forEach((c) =>
+  c.addEventListener("click", () => { qEl.value = c.dataset.q; qEl.focus(); })
+);
+
+qEl.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") ask();
+});
+goEl.addEventListener("click", ask);
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const arxivUrl = (id) => `https://arxiv.org/abs/${encodeURIComponent(id)}`;
+
+/** 답변이 마크다운으로 오므로 최소한만 렌더링 (라이브러리 없이) */
+function render(md) {
+  const lines = esc(md).split("\n");
+  let html = "", inList = false;
+  const inline = (t) => t
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`(.+?)`/g, "<code>$1</code>")
+    // [2510.22344v1] 인용을 arXiv 링크로
+    .replace(/\[(\d{4}\.\d{4,5}v?\d*)\]/g,
+      (_, id) => `<a class="cite" href="${arxivUrl(id)}" target="_blank" rel="noopener">${id}</a>`);
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    const li = line.match(/^[-*]\s+(.*)$/);
+    if (li) {
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += `<li>${inline(li[1])}</li>`;
+      continue;
+    }
+    if (inList) { html += "</ul>"; inList = false; }
+    if (!line) continue;
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    html += h ? `<h3>${inline(h[2])}</h3>` : `<p>${inline(line)}</p>`;
+  }
+  if (inList) html += "</ul>";
+  return html;
+}
+
+/* ── 실행 상태: 진행 중 → 완료 ── */
+let timer = null, startedAt = 0;
+const elapsed = () => Math.floor((Date.now() - startedAt) / 1000);
+
+function startRun() {
+  goEl.disabled = true;
+  startedAt = Date.now();
+  statusEl.hidden = false;
+  statusEl.classList.remove("done");
+
+  const tick = () => {
+    const s = elapsed();
+    statusEl.innerHTML =
+      `<span class="spinner"></span>에이전트 실행 중… ${s}초` +
+      (s > 15 ? " <span style='opacity:.7'>— 논문 수집은 1분 이상 걸릴 수 있습니다</span>" : "");
+  };
+  tick();
+  timer = setInterval(tick, 1000);
+}
+
+function endRun(ok) {
+  goEl.disabled = false;
+  clearInterval(timer);
+  timer = null;
+  if (ok) {
+    statusEl.classList.add("done");
+    statusEl.innerHTML = `<span class="check">✓</span>에이전트 실행 완료 · ${elapsed()}초`;
+  } else {
+    statusEl.hidden = true;       // 실패는 아래 안내 문구로만 표시
+  }
+}
+
+function notice(cls, msg) {
+  resultEl.innerHTML = `<div class="card notice ${cls}">${esc(msg)}</div>`;
+}
+
+async function ask() {
+  const question = qEl.value.trim();
+  if (question.length < 2) { notice("warn", "질문을 2자 이상 입력해주세요."); return; }
+
+  resultEl.innerHTML = "";
+  startRun();
+  let ok = false;
+  try {
+    const res = await fetch("/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Token": tokenEl.value.trim() },
+      body: JSON.stringify({ question }),
+    });
+
+    if (res.status === 401) {
+      notice("error", "인증 실패 — API 토큰을 확인해주세요.");
+      authPanel.hidden = false;          // 토큰을 바로 고칠 수 있게 펼침
+      tokenEl.focus();
+      return;
+    }
+    if (res.status === 422)      { notice("warn",  "질문 형식이 올바르지 않습니다 (2~300자)."); return; }
+    if (res.status === 503)      { notice("error", "LLM 서비스에 접근할 수 없습니다. 잠시 후 다시 시도해주세요."); return; }
+    if (!res.ok)                 { notice("error", `요청 실패 (HTTP ${res.status})`); return; }
+
+    show(await res.json());
+    ok = true;
+  } catch (e) {
+    notice("error", "서버에 연결할 수 없습니다.");
+  } finally {
+    endRun(ok);
+  }
+}
+
+function show(d) {
+  // 에이전트가 실제로 한 일을 배지로 노출
+  const badges = [`<span class="badge intent">intent: ${esc(d.intent || "-")}</span>`];
+  if (d.search_retries > 0) badges.push(`<span class="badge">QA 재검색 ${d.search_retries}회</span>`);
+  if (d.critic_runs > 0)    badges.push(`<span class="badge">Critic 검증 ${d.critic_runs}회</span>`);
+  if (d.grounded === true)  badges.push(`<span class="badge ok">근거 검증 통과</span>`);
+  if (d.gave_up)            badges.push(`<span class="badge warn">항복: ${esc(d.give_up_reason || "")}</span>`);
+
+  let body = "";
+  if (d.gave_up) {
+    body = `<div class="notice warn">${esc(d.answer || "답변을 생성하지 못했습니다.")}</div>`;
+  } else if (d.intent === "search") {
+    body = `<p>arXiv에서 ${d.papers.length}편을 수집해 코퍼스에 저장했습니다. 이제 이 주제로 질문할 수 있습니다.</p>`;
+  } else {
+    body = `<div class="answer">${render(d.answer || "")}</div>`;
+  }
+
+  const papers = (d.papers || []).map((p) => `
+    <a class="paper" href="${arxivUrl(p.paper_id)}" target="_blank" rel="noopener">
+      <div class="paper-id">${esc(p.paper_id)}</div>
+      <div class="paper-title">${esc(p.title)}</div>
+    </a>`).join("");
+
+  resultEl.innerHTML = `
+    <div class="card">
+      <div class="meta">${badges.join("")}</div>
+      ${body}
+      ${papers ? `<div class="papers"><h2>참조 논문 ${d.papers.length}편</h2>${papers}</div>` : ""}
+    </div>`;
+}
+</script>
+</body>
+</html>

@@ -13,6 +13,7 @@ RUN python -c "from sentence_transformers import SentenceTransformer; \
     SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
 
 COPY src/ ./src/
+COPY static/ ./static/
 COPY app.py .
 
 ENV PYTHONPATH=/app/src

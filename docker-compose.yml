@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    image: paperpilot:latest
+    image: dan9872/paperpilot:latest
     container_name: paperpilot
 
     ports:
