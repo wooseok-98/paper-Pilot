@@ -85,12 +85,48 @@ PYTHONPATH=src python src/main.py "RAG에서 환각을 줄이는 방법은?"
 pytest
 ```
 
+**Docker**
+```bash
+docker build -t paperpilot .
+docker compose up -d       # 볼륨(./data) · env_file · healthcheck 포함
+docker compose logs -f
+```
+
+## 배포
+
+EC2 단일 인스턴스 + Docker + 볼륨 마운트
+
+```
+사용자 → EC2(t4g.small, ARM) → 컨테이너(uvicorn --workers 1)
+                                    └ /app/data ← 호스트 볼륨 (코퍼스 영속성)
+```
+
+| 항목 | 선택 | 이유 |
+| --- | --- | --- |
+| 인스턴스 | `t4g.small` (ARM/Graviton) | 빌드 머신이 Apple Silicon이라 아키텍처 일치 · torch+임베딩 모델이 500~800MB라 1GB 인스턴스는 OOM |
+| 이미지 | CPU 전용 torch | 기본 휠은 CUDA 라이브러리가 딸려와 8.89GB → **2.17GB** |
+| 데이터 | 볼륨 마운트 | 이미지에 넣으면 재배포 때마다 수집한 논문이 초기화됨 |
+| 워커 | 1개 고정 | 코퍼스 쓰기 락이 프로세스 내에서만 유효 |
+
+EC2에는 코드를 두지 않고 `docker-compose.yml` · `.env` · `data/` 세 가지만 전송한 뒤 레지스트리에서 이미지를 받아 실행
+
 ## API
 
-| 엔드포인트 | 용도 |
-| --- | --- |
-| `POST /ask` | 논문 검색 요청 또는 질의응답 (**Orchestrator가 의도를 판단해 라우팅**) |
-| `GET /health` | 헬스체크 |
+| 엔드포인트 | 인증 | 용도 |
+| --- | --- | --- |
+| `POST /ask` | **필요** | 논문 검색 요청 또는 질의응답 (**Orchestrator가 의도를 판단해 라우팅**) |
+| `GET /health` | 불필요 | 헬스체크 (컨테이너 healthcheck가 호출) |
+
+**인증** — `PAPERPILOT_TOKEN`이 설정돼 있으면 `X-API-Token` 헤더 필요
+
+```bash
+curl -X POST http://<host>:8000/ask \
+  -H "Content-Type: application/json" \
+  -H "X-API-Token: <토큰>" \
+  -d '{"question":"RAG에서 환각을 줄이는 방법은?"}'
+```
+
+> 배포 환경의 공인 IP가 유동적이라 방화벽 IP 제한만으로는 운용이 어려워, 포트는 열고 애플리케이션에서 토큰을 검사하는 방식을 선택. 미설정 시 인증을 걸지 않으므로 **배포 후 토큰 없이 호출해 401이 나오는지 확인 필요**
 
 요청·응답 예시
 ```jsonc
@@ -126,6 +162,7 @@ pytest
 - **코퍼스 밖 주제는 답변 불가** — 재검색 상한 후 정직하게 항복. 질의응답 중 자동 수집은 Future Work
 - **초록에 없는 세부사항 답변 불가** — 초록 레벨 MVP이므로 PDF 전문 파싱은 Non-Goal
 - **단일 워커 전제** — 코퍼스 쓰기를 프로세스 내 락으로 보호. 스케일 아웃 시 벡터 DB 이전 필요
+- **arXiv 요청 제한** — 검색 1회가 arXiv를 최대 4회 호출. 반복 호출 시 HTTP 429로 일시 차단되며, 이때는 검색 실패를 정직한 항복 메시지로 반환
 
 ## 문서
 - [docs/architecture.md](docs/architecture.md) — Goals/Non-Goals, Agent Design, Design Decisions
