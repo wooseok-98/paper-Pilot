@@ -13,7 +13,11 @@ def search_papers(query: str, max_results: int = 10) -> list[dict]:
 
     # list()로 감싸 네트워크 요청을 try 블록 안에서 끝냄
     try:
-        results = list(arxiv.Client(delay_seconds=3, num_retries=3).results(search))
+        results = list(arxiv.Client(
+            page_size=max_results,
+            delay_seconds=3, 
+            num_retries=3,
+            ).results(search))
     except Exception as e:
         raise SearchUnavailable(f"arXiv 검색 실패: {e}") from e
     

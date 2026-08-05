@@ -1,0 +1,23 @@
+services:
+  app:
+    build: .
+    image: paperpilot:latest
+    container_name: paperpilot
+
+    ports:
+      - "8000:8000"
+
+    env_file: .env
+
+    volumes:
+      - ./data:/app/data            # 코퍼스 영속성 (컨테이너를 지워도 남음)
+
+    restart: unless-stopped         # 죽거나 서버가 재부팅돼도 자동 재시작
+
+    healthcheck:                    # 컨테이너가 살아있는지 주기적으로 확인
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s             # 모델 로딩 시간 — 이 동안은 실패해도 안 세뿜
+      retries: 3
