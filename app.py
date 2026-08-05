@@ -1,12 +1,29 @@
 """FastAPI 진입점 - LangGraph 엔진을 감싸는 얇은 HTTP 어댑터"""
+import os
+import secrets
+
 import anthropic
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from graph import graph
 from llm import StructuredOutputError
 
 app = FastAPI(title="Paper Pilot")
+
+API_TOKEN = os.getenv("PAPERPILOT_TOKEN")
+
+
+def verify_token(x_api_token: str = Header(default="")):
+    """PAPERPILOT_TOKEN이 설정돼 있으면 X-API-Token 헤더와 일치해야 통과
+
+    미설정이면 인증을 걸지 않음 (로컬 개발 편의)
+    """
+    if not API_TOKEN:
+        return
+    if not secrets.compare_digest(x_api_token.encode(), API_TOKEN.encode()):
+        raise HTTPException(status_code=401, detail="인증이 필요합니다")
+
 
 # 요청
 class AskRequest(BaseModel):
@@ -32,7 +49,7 @@ class AskResponse(BaseModel):
 def health():
     return {"status": "ok"}
 
-@app.post("/ask", response_model=AskResponse)
+@app.post("/ask", response_model=AskResponse, dependencies=[Depends(verify_token)])
 def ask(req: AskRequest):
     try:
         state = graph.invoke(
