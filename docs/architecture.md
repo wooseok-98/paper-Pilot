@@ -10,7 +10,7 @@
 
 논문 초록(abstract) 레벨의 RAG를 기본으로 하고, Orchestrator가 사용자 의도에 따라 처리 경로를 라우팅
 
-**설계 원칙:** 각 노드는 단순 함수·LLM 1회 호출이 아니라 **결과를 보고 스스로 다음 행동을 결정하는 에이전트** (리트머스: "결과를 보고 자기 행동을 바꾸는가?")
+**설계 원칙:** 각 노드는 단순 함수·LLM 1회 호출이 아니라 **결과를 보고 스스로 다음 행동을 결정하는 에이전트** (리트머스: "결과를 보고 자기 행동을 바꾸는가?") — 이 기준으로 초기 설계의 Comparator를 제외 → [[ADR-001]]
 
 ---
 
@@ -33,37 +33,52 @@
 
 ## Architecture
 
-```
-                         [사용자 질문]
-                             │
-                             ▼
-                   ┌───────────────────┐
-                   │    Orchestrator   │   Layer 1: 라우팅
-                   └─────────┬─────────┘
-                       의도 분류로 분기
-              ┌──────────────┴──────────────┐
-              ▼                             ▼
-      ┌───────────────┐             ┌───────────────┐
-      │   Researcher  │             │      QA       │   Layer 2: 작업 워커
-      │  검색 자기교정 ⟳ │             │  self-RAG ⟳   │   (둘 중 하나로 라우팅)
-      └───────┬───────┘             └───────┬───────┘
-              │ 논문 저장                     │ 초안 답변
-              │                             ▼
-              │                     ┌───────────────┐
-              │                     │     Critic    │   Layer 3: 근거 검증
-              │                     │   검증 반려 ⟳   │◀─┐
-              │                     └───────┬───────┘  │ 미근거 → QA 재작성
-              │                             │ 통과      │
-              │                             └──────────┘
-              │                             │    
-              ▼                             ▼
-                        [사용자에게 응답]
+README의 다이어그램은 4-agent 개념도이고, 아래는 `graph.py`의 실제 노드명·조건까지 보이는 구현 레벨 버전
+
+```mermaid
+flowchart TD
+    Q(["사용자 질문"]):::terminal --> ORC["`**Orchestrator**
+의도 분류`"]:::orchestrator
+    ORC -- search --> RES["`**Researcher**
+검색 + CRAG 필터`"]:::researcher
+    RES --> SAVE(["코퍼스 저장"]):::terminal
+    ORC -- query --> RET
+
+    subgraph QAG["QA · self-RAG"]
+        RET["`**retrieve**
+초록 top-k 검색`"]:::qa --> CHK{"충분한가?"}:::qa
+        CHK -- 아니오 --> RW["`**rewrite_query**
+쿼리 재작성`"]:::qa --> RET
+    end
+
+    CHK -- 예 --> GEN
+
+    subgraph CRG["Critic · Reflection"]
+        GEN["`**generate_answer**
+초록 근거 답변 생성`"]:::critic --> CR{"근거 있음?"}:::critic
+    end
+
+    CR -- 반려 --> GEN
+    CR -- 통과 --> ANS(["응답"]):::terminal
+    RW -. 재검색 상한 .-> GU(["포기 · 정직한 항복"]):::giveup
+    CR -. 재생성 상한 .-> GU
+    GU --> ANS
+
+    classDef orchestrator fill:#e4e0f7,stroke:#6b5fc4,color:#2c2560,stroke-width:1.5px
+    classDef researcher fill:#f6e2d8,stroke:#c1663a,color:#5c2c14,stroke-width:1.5px
+    classDef qa fill:#d9f0ea,stroke:#2f8f74,color:#134a3b,stroke-width:1.5px
+    classDef critic fill:#f7e2ea,stroke:#c14b7e,color:#5c1638,stroke-width:1.5px
+    classDef terminal fill:#eceae4,stroke:#8a8776,color:#33322c,stroke-width:1px
+    classDef giveup fill:#eceae4,stroke:#8a8776,color:#6b6a63,stroke-width:1px,stroke-dasharray: 3 3
+    style QAG fill:none,stroke:#2f8f74,stroke-dasharray: 2 2
+    style CRG fill:none,stroke:#c14b7e,stroke-dasharray: 2 2
 ```
 
 - **Orchestrator**: 요청을 `search`(검색·저장) / `query`(질의응답)로 분류해 워커로 라우팅
-- **Layer 2 (Researcher·QA)**: Orchestrator가 의도 보고 **둘 중 하나** 선택하는 형제 워커
-- **Layer 3 (Critic)**: 라우팅 대상이 아니라, QA가 답을 만들면 **그 뒤에 자동으로 붙어** 근거를 검사하는 리뷰어
-- **각 노드의 `⟳`**: 결과를 평가해 필요하면 스스로 재시도하는 자기교정 루프
+- **Researcher·QA**: Orchestrator가 의도 보고 **둘 중 하나** 선택하는 형제 워커 (QA는 `retrieve`~`rewrite_query` subgraph로 펼침)
+- **Critic subgraph**: 라우팅 대상이 아니라, QA가 답을 만들면 **그 뒤에 자동으로 붙어** 근거를 검사하는 리뷰어
+- **subgraph 안의 순환**: 결과를 평가해 필요하면 스스로 재시도하는 자기교정 루프 — `retrieve↔rewrite_query`(재검색), `generate_answer↔critic`(재생성)
+- **노드 분해 기준**: 다른 에이전트와 사이클로 얽히면 펼치고(QA), 자기 안에서만 돌면 통째로 둠(Researcher)
 
 ---
 
@@ -77,20 +92,6 @@
 | **Researcher** | 2 | 넓게 검색 후 **논문별 관련성을 채점해 솎아냄**, 통과분 부족하면 후보 확장 후 재필터 | Self-correction / CRAG |
 | **QA** | 2 | 검색된 초록으로 답변 가능한지 판정, 부족하면 **쿼리 재작성 후 재검색** | Self-RAG / CRAG |
 | **Critic** | 3 | 답변이 초록에 실제 근거 있는지 채점, 미근거면 **QA에 재작성 반려** | Reflection / Generator-Critic |
-
-> **Orchestrator 근거:** 자체 자기교정 루프는 없지만, **판단이 그래프 전체의 실행 경로를 바꾸는 분기점**이라 Routing 패턴으로 분류(Comparator가 자기 안에서 정해진 순서만 밟았던 것과 구별됨). JSON Schema `enum: ["search", "query"]`로 값 자체를 강제 — 목록 밖 값이 나오면 그래프가 라우팅 불가하므로 형식(`tool_choice`)에 더해 값까지 제약. **판단 기준 정정:** 초기엔 "이미 수집된 논문인가"로 물었으나 그건 코퍼스 상태라 **질문 문장만으로 알 수 없어** 오분류 발생(질의응답 질문을 `search`로 분류) → **"무엇을 해달라는 요청인가"**(찾아줘 = search / ~할 수 있나? = query)라는 문장에서 관측 가능한 기준으로 교체해 해결
->
-> **Researcher 자기교정 근거:** arXiv 기본 검색에서 실증한 **반대 방향의 두 실패** — (1) 오염(precision): `"stable diffusion"` 검색 시 재료과학 diffusion 논문 혼입, 20개까지 확장해도 지속. (2) 누락(recall): 원조 논문("High-Resolution Image Synthesis with Latent Diffusion Models")은 20위 안에도 없음(arXiv Relevance 정렬이 유명 논문·인용수를 반영 안 함). **자기교정 지렛대 전환:** 처음엔 "결과 평가 → 쿼리 재작성 후 재검색"으로 설계했으나, LLM이 만든 `NOT ...` 제외 쿼리를 arXiv API가 지원하지 않아 5회 재시도 전부 실패하고 오염된 결과를 저장 → **교정 행동이 도구 능력과 맞아야 작동**한다는 교훈. 쿼리 재작성(arXiv가 무시) 대신 **결과 필터링(우리가 통제)** 으로 전환: 넓게 검색해 잡음을 감수하고, LLM이 논문별 관련성을 채점해 솎아냄(CRAG). 이렇게 하면 대체 쿼리(recall)가 끌어온 잡음도 필터가 청소
-
-> **QA self-RAG 근거:** 검색 한 번 후 무조건 답하면 정적 RAG 함수 — 근거 부족 시 재검색하는 판단 루프가 있어야 에이전트. LLM grader가 **관련성·충분성**을 채점해 재검색 여부 결정. **여기선 쿼리 재작성이 유효한 지렛대** — Researcher(arXiv)와 달리 QA는 우리 FAISS 코퍼스를 검색하므로, 쿼리를 바꾸면 임베딩이 바뀌고 실제로 다른 논문이 반환됨(교정 행동이 결과를 실제로 바꿈). 답변 생성은 `system` 프롬프트로 "제공된 초록에 있는 내용만, 없으면 언급 없음, `paper_id` 표기"를 강제 → Critic이 검증할 기준선을 만듦
-
-> **Critic 근거:** 초록 기반이라 "이 주장이 초록에 실제로 있나"를 검증하기 자연스러움. 답변 생성 후 근거 일치·환각 여부를 채점해 반려하는 Reflection 루프. MVP는 **QA 답변만** 검증(Researcher는 저장이 주 업무라 환각 위험 낮음), 후속으로 Researcher 요약까지 확장 가능
->
-> **QA 충분성 검사와의 경계:** QA는 생성 **전**에 **입력**(검색된 초록)이 충분한지 보고, Critic은 생성 **후**에 **출력**(답변)이 그 입력에 근거하는지 봄. 재료가 충분해도 LLM이 파라메트릭 지식을 섞어 환각을 낼 수 있으므로 둘 다 필요. Critic을 "이 답변 괜찮아?" 같은 총평으로 만들면 QA와 겹쳐 존재 이유를 잃으므로, **반드시 "각 주장 ↔ 초록" 대조**로 좁힘
->
-> **반려 피드백이 재생성 입력이 되는 것이 핵심:** `issues`(구체적 지적 목록)를 `generate_answer(feedback=...)`로 전달해 다음 생성 프롬프트에 넣음. 같은 입력으로 재생성하면 같은 환각이 반복되므로, **교정 행동이 입력을 실제로 바꿔야** 재시도가 의미를 가짐(Researcher에서 얻은 교훈과 동일)
->
-> **실증 검증:** 근거 없는 주장 3개(정확도 수치·개발 기관·수상 이력)를 심은 답변을 넣자 Critic이 **3개 모두 검출**하고 각각 초록에 없는 이유를 지적 → 피드백 반영해 재생성한 답변은 `grounded=true` 통과. 통과 경로뿐 아니라 **반려 경로까지 확인**해야 "항상 통과시키는 무의미한 노드"가 아님이 증명됨
 
 ---
 
@@ -110,91 +111,6 @@
 
 ---
 
-## Key Flows
-
-### 1. 검색 (Researcher)
-```
-쿼리 → LLM: 대체 기술 용어 제안 (제품명↔논문 정식 용어 매핑, 예: "stable diffusion"→"latent diffusion model")
-     → 원본 쿼리 + 대체 쿼리 각각 arXiv 검색 → paper_id 기준 병합 (넓게, recall)
-     → filter_relevant: LLM이 논문별 관련성 채점 → 관련 paper_id만 남김 (precision)
-                        ├ 통과분 < min_results → 후보 더 검색해 확장 → 재필터 (최대 N회)
-                        └ 충분 → Ingestor (통과분만 초록·메타데이터 임베딩 → DB)
-```
-> 대체 쿼리 생성은 누락(recall) 대응, 결과 필터링은 오염(precision) 대응 — 반대 방향 실패 둘 다 다룸. 저장은 필터 통과분만 → 자기교정이 포기해도 불량 데이터 저장 안 함
-
-### 2. 질의응답 (QA → Critic)
-```
-질문 → Retriever 검색 → grader: 관련성·충분성 판단
-                          ├ 부족 → 쿼리 재작성 → 재검색 (최대 N회)
-                          └ 충분 → 근거 기반 답변 생성 → Critic 검증
-                                     ├ 미근거 → QA 재작성 (최대 N회)
-                                     └ 통과 → 응답
-```
-
-> **루프 종료 조건:** 모든 자기교정·검증 루프는 재시도 상한(`max_retries`)을 두어 무한 반복 방지. 상한 도달 시 "정보 부족" 등 정직하게 항복
-
----
-
-## Graph 배선 (`graph.py`)
-
-위 흐름을 LangGraph `StateGraph`로 구현. 공유 `State`가 노드를 관통하며 채워지고, 조건부 엣지가 라우팅·사이클을 표현.
-
-```
-START → orchestrator ─(intent)─┬─ search → researcher → END
-                               └─ query  → retrieve → check_sufficiency ─(sufficient?)─┐
-                                              ▲                                         │
-              (재검색: 재료를 새로) rewrite_query ◄── 부족·재시도<max                           │ 충분
-                                                                                        ▼
-                                             generate_answer → critic ─(grounded?)─┬─ 근거O → END
-                                                    ▲                              │
-                          (재생성: issues 피드백) ─────┴──────── 미근거·재시도<max ◄──────┘
-                                                    │
-                         (양쪽 상한 소진) ──────────→ give_up → END
-```
-
-**설계 결정:**
-- **에이전트마다 노드화 정도가 다름** — QA는 self-RAG 사이클이 Critic 사이클과 얽혀 있어 **4개 노드로 펼침**(retrieve·check_sufficiency·rewrite_query·generate_answer), Researcher는 내부 CRAG 루프가 독립적이라 **통째로 1노드**. 기준: "다른 에이전트와 사이클로 얽히면 펼치고, 자기 안에서만 돌면 통째로 둔다"
-- **제어 흐름을 전부 그래프로** — `qa.answer()` 함수 안 for문에 숨어 있던 self-RAG 루프를 그래프 엣지로 끄집어냄. 재시도 카운터(`search_retries`·`critic_retries`)를 State 필드로 노출해 라우팅이 종료를 판단
-- **제어권은 그래프에 있음(ReAct 아님)** — LLM에게 도구 선택을 맡기지 않고, 각 노드에서 명시적으로 도구/LLM을 호출. 예측 가능성·디버깅 우선
-- **`give_up` 항복 노드** — 두 사이클의 상한 소진을 한 노드로 모으되, 노드 안에서 `sufficient` 값을 읽어 사유(`insufficient`/`ungrounded`)를 구분. 노드를 늘리지 않고 사유는 데이터(`give_up_reason`)로 남김
-- **접착제(glue) 노드** — `rewrite_query`는 LLM·도구 호출 없이 State만 조작(제안→확정 승격 + 카운터 증가). 라우팅 함수는 State를 못 바꾸므로 카운터 증가는 노드가 담당
-
----
-
-## Tech Stack
-
-| 영역 | 선택 |
-| --- | --- |
-| 오케스트레이션 | LangGraph (조건부 라우팅 + 자기교정 사이클 표현) |
-| LLM | Claude API (tool use, 구조화 출력) |
-| 논문 검색 | arxiv (Semantic Scholar는 후속) |
-| 임베딩 | sentence-transformers `all-MiniLM-L6-v2` (영어) |
-| 벡터 DB | FAISS (인덱스 + 메타데이터 JSON) |
-| 서빙 | FastAPI (Router-Controller — LangGraph 엔진을 그대로 감싸는 얇은 HTTP 어댑터) |
-
----
-
-## Design Decisions
-
-| 결정 | 선택 | 근거 |
-| --- | --- | --- |
-| 문서 단위 | **초록 기반** | PDF 파싱 비용 회피, 스크리닝엔 초록으로 충분 |
-| 검색 소스 | **arXiv** | 공식 무료 API, Google Scholar는 크롤링 필요해 배제 |
-| 임베딩 모델 | **영어 모델로 교체** | 기존 RAG 챗봇은 한국어 모델(`ko-sroberta`) 사용, 논문 초록은 영어이므로 언어 정합성 필요 |
-| 벡터 DB | **FAISS** | 기존 RAG 챗봇 스택 재사용 (인덱스+메타 JSON 패턴) |
-| 노드 설계 | **에이전트 우선** | 단순 도구·LLM 체인이 아닌 자기교정 루프 보유 (리트머스 통과) |
-| 조율 방식 | **순차 라우팅 + Critic** | 병렬 fan-out 없이도 자율 루프 3개(Researcher·QA·Critic)로 멀티 에이전트 성립. 병렬은 복잡도 대비 이득이 MVP 스코프엔 불필요 |
-| 검증 노드 | **Critic 추가** | 초록 기반 답변의 환각 억제, "RAG 환각 어떻게 막나" 대응. Reflection 패턴 |
-| Comparator | **제외** | 자기교정 루프 없는 정적 LLM 체인 → 가짜 에이전트. 필요 시 루프 넣어 후속 부활 |
-| 서빙 방식 | **Streamlit → FastAPI로 변경** | 최종 목표가 API 서비스라 Streamlit은 나중에 버릴 코드가 됨(YAGNI 위배). 그래프는 CLI 스모크 테스트(`graph.invoke()` + print)로 UI 없이 먼저 검증하고, 완성 후 FastAPI Router-Controller를 얇은 HTTP 어댑터로 씌움 — LangGraph 엔진 자체는 그대로 재사용 |
-| 누락(recall) 대응 | **첫 검색부터 대체 쿼리 병행** (반응형 재검색 아님) | 결과만 보고 판단하는 자기교정은 "애초에 없는 논문"을 알아채기 어려움(맹점) → LLM 배경지식으로 원본+대체 용어를 처음부터 병행 검색해 병합. `call_structured()` 단발 호출로 충분 — 별도 "쿼리 확장 에이전트"로 만들지 않음(자기교정 루프 없어 가짜 에이전트가 됨, Comparator와 같은 함정) |
-| 오염(precision) 대응 | **쿼리 재작성 → 결과 필터링(CRAG)으로 전환** | 첫 설계(결과 평가→`revised_query` 재검색)는 실행 시 5회 재시도 전부 실패 후 오염 데이터 저장 — LLM이 만든 `NOT ...` 제외 쿼리를 **arXiv가 지원 안 함**(자기교정 지렛대가 도구 능력과 안 맞음). arXiv에 의존하는 쿼리 재작성 대신 **우리가 통제하는 결과 필터링**으로 전환: `filter_relevant`가 논문별 관련성 채점→관련 `paper_id`만 배열로 받아 솎음, 통과분 부족 시에만 후보 확장 후 재필터. 저장은 통과분만(불량 저장 방지). 필터 프롬프트는 "비슷한 기법을 다른 분야에 쓴 논문 제외"로 조여야 정밀도 확보 |
-| 임베딩 파인튜닝 | **보류(조건부)** — Future Work에서 확정 계획 아닌 검토 항목으로 하향 | (1) 파인튜닝이 실제로 고치는 지점(질문↔초록 매칭)은 실증된 문제가 아니라 가설 — 검증 없이 확정하면 이 프로젝트가 지켜온 증거 기반 결정 원칙에 위배. (2) `all-MiniLM-L6-v2`가 이미 QA 스타일 문장쌍 포함 대규모 데이터로 학습돼 이 용도에 이미 준수한 성능일 가능성. **재검토 조건:** #6~#8 완성 후 Evaluation의 "검색 관련도" 지표로 실측해서 실제로 부족하면 그때 착수 |
-
-> 상세 결정 기록은 `docs/decisions.md` (ADR — 결정 시마다 누적)
-
----
-
 ## Evaluation
 
 | 지표 | 측정 |
@@ -207,13 +123,12 @@ START → orchestrator ─(intent)─┬─ search → researcher → END
 ---
 
 ## Future Work
-- **PDF 전문 인덱싱 + 전문 기반 요약** — 심층 질의응답 (Non-Goal에서 승격)
-- **병렬 fan-out (하위주제)** — 넓은 질문을 하위주제로 분해해 Researcher N개 동시 실행 + Synthesizer 병합 (LangGraph `Send` map-reduce)
-- **병렬 fan-out (쿼리 변형)** — Researcher의 대체 쿼리를 1개가 아니라 3~5개 동시 생성해 `Send`로 병렬 검색·병합(Multi-Query Retrieval). 하위주제 fan-out보다 스코프가 작아 `Send` 메커니즘을 먼저 연습해볼 디딤돌로 적합. #6에서 대체 쿼리 1개짜리로 먼저 검증 후, 그래도 누락이 남으면 업그레이드
-- **복합 요청 다단계 처리** — 현재 Orchestrator는 `search`/`query` 중 **하나만** 고르는 라우팅이라 "논문 찾아서 데이터셋 알려줘" 같은 복합 요청은 한쪽으로만 처리됨. 초기 설계의 Supervisor Planning 패턴(다단계 계획)을 되살리면 해결되나 복잡도 대비 MVP 이득 없어 보류
-- **QA → Researcher 폴백 (스코프아웃)** — `query`로 라우팅됐는데 코퍼스에 해당 주제 논문이 없으면 QA가 항복하고 끝남. 항복 시 Researcher로 넘겨 논문을 수집한 뒤 다시 답하는 엣지를 추가하면 의도 분류의 근본적 애매함(코퍼스 상태를 문장만으로 알 수 없음)을 실행 단계에서 보완 가능. **설계까지 마쳤으나 배포를 우선해 보류** — 판단 순서는 확실한 사실(인덱스 부재·코퍼스가 k보다 작음·재작성 소진)을 먼저 보고, 종료 조건은 재시도 횟수가 아니라 **"코퍼스가 실제로 늘었는가"**(중복 제거 + `temperature=0` 때문에 2회차는 증명상 무의미). 재개 시 카운터는 반드시 `State`에 직접 선언해야 함 — 조건부 엣지의 라우터는 출발 노드의 스키마로 필터된 상태만 보기 때문에, 서브클래스에 두면 `None`으로 읽혀 상한이 걸리지 않음
-- **Comparator 부활** — 비교표 빈칸 감지 시 추가 검색하는 자기교정 루프 부여
-- **Semantic Scholar 인용 그래프 큐레이션 (v2)** — "분야 원논문 + 중요 파생 논문 찾아줘" 요청 대응. arXiv는 인용·중요도 신호가 없어 원조 논문이 검색 상위에 안 떠 이 목표를 못 이룸 → S2의 인용수·인용 그래프로 앵커→조상(원논문)·후손(중요 파생)을 큐레이션. `src/scholar.py` 클라이언트까지 프로토타입했으나 **에이전트 완성(데모·서빙·배포) 우선** + S2 무인증 rate limit 리스크 대비 포트폴리오 이득이 낮아 **v2로 스코프 아웃**. 착수 시 arXiv 검색을 S2로 교체(`paper_id`도 S2 ID로 통일)
-- **임베딩 모델 파인튜닝 (조건부)** — Design Decisions 참고. #6~#8 완성 후 "검색 관련도" 지표로 실측해서 질문↔초록 매칭이 실제로 부족할 때만 착수. 착수 시: `all-MiniLM-L6-v2`를 `sentence-transformers` `MultipleNegativesRankingLoss`로 파인튜닝, 학습 데이터는 `call_llm()`으로 초록마다 합성 질문 생성(질문=anchor, 초록=positive) — 실제 추론 시나리오(질문→초록)와 형태 일치. (제목,초록) 쌍은 보조로만. 검증은 동일 지표로 전/후 비교
-- **진행 상황 스트리밍** — 현재 `graph.invoke()`는 완료까지 기다렸다가 한 번에 응답(검색 경로는 30~60초). `graph.stream()`으로 "검색 중 / 검증 중" 같은 중간 단계를 흘려보내면 대기 경험이 개선됨. UI에는 경과 시간 타이머로 대신하고 있음
-- **프로덕션 준비 (일부 완료)** — 배포 과정에서 처리된 것: 외부 API 실패 처리(ADR-022) · `pytest` 테스트 40개 · 코퍼스 경로 외부화(`config.py` + 환경변수) · `pydantic` 요청·응답 검증(ADR-024) · 토큰 인증(ADR-026) · 컨테이너 동시 쓰기 보호(ADR-021). **남은 것:** `print()` → `logging` 모듈 · 나머지 하드코딩 상수 외부화 · 정식 패키지 구조(`pyproject.toml`, `PYTHONPATH=src` 의존 제거) · 토큰·비용 추적 · 캐싱(FAISS 인덱스 모듈 레벨 캐싱은 **코퍼스 쓰기 후 무효화가 전제** — 없으면 수집한 논문이 검색에 안 잡힘) · 라우팅 정확도 평가셋
+
+| 항목 | 상태 |
+| --- | --- |
+| PDF 전문 인덱싱 + 요약 | 초록 스크리닝 후 선택 논문만 정독하는 2단 구조 전제 |
+| 병렬 fan-out (하위주제 분해) | 순차로 핵심 루프 검증 후 확장 (`Send` map-reduce + Synthesizer 병합) |
+| 복합 요청 다단계 처리 | "찾아서 알려줘" 같은 복합 요청 — Supervisor Planning 필요하나 MVP엔 복잡도 대비 이득 없어 보류 |
+| 진행 상황 스트리밍 | `graph.invoke()` 대신 `graph.stream()`으로 중간 단계 노출 (검색 경로 30~60초 대기) |
+| QA → Researcher 폴백 | QA에서 근거 초록 없을 경우 논문 검색으로 풀백 기능 구현 예정 |
+| Semantic Scholar 인용 그래프 | 검색 주제에 해당하는 원논문, 인용논문 검색 기능 구현 예정 |

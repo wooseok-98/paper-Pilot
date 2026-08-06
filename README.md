@@ -6,10 +6,29 @@
 
 ## 아키텍처
 
-```
-사용자 질문 → Orchestrator (라우팅)
-                 ├ search → Researcher (검색 자기교정 ⟳) → 저장
-                 └ query  → QA (self-RAG ⟳) → Critic (근거 검증 ⟳) → 응답
+```mermaid
+flowchart TD
+    Q(["사용자 질문"]):::terminal --> ORC["`**Orchestrator**
+의도 분류`"]:::orchestrator
+    ORC -- search --> RES["`**Researcher**
+검색 자기교정 ⟳`"]:::researcher
+    RES --> SAVE(["코퍼스 저장"]):::terminal
+    ORC -- query --> QAN["`**QA**
+self-RAG ⟳`"]:::qa
+    QAN -- 재검색 상한 --> GU(["포기 · 정직한 항복"]):::giveup
+    QAN -- 초록 충분 --> CRT["`**Critic**
+근거 검증 ⟳`"]:::critic
+    CRT -- 반려 --> QAN
+    CRT -- 재생성 상한 --> GU
+    CRT -- 통과 --> ANS(["응답"]):::terminal
+    GU --> ANS
+
+    classDef orchestrator fill:#e4e0f7,stroke:#6b5fc4,color:#2c2560,stroke-width:1.5px
+    classDef researcher fill:#f6e2d8,stroke:#c1663a,color:#5c2c14,stroke-width:1.5px
+    classDef qa fill:#d9f0ea,stroke:#2f8f74,color:#134a3b,stroke-width:1.5px
+    classDef critic fill:#f7e2ea,stroke:#c14b7e,color:#5c1638,stroke-width:1.5px
+    classDef terminal fill:#eceae4,stroke:#8a8776,color:#33322c,stroke-width:1px
+    classDef giveup fill:#eceae4,stroke:#8a8776,color:#6b6a63,stroke-width:1px,stroke-dasharray: 3 3
 ```
 
 각 노드는 단순 함수 호출이 아니라 **결과를 보고 스스로 다음 행동을 결정하는 에이전트**
@@ -20,6 +39,39 @@
 | Researcher | arXiv 검색 → 결과 부적합하면 쿼리 수정 후 재검색 |
 | QA | 검색된 초록으로 self-RAG 질의응답, 근거 부족하면 재검색 |
 | Critic | 생성된 답변이 초록에 실제 근거하는지 검증, 미근거면 QA에 반려 |
+
+## 요청 처리 흐름
+
+위 다이어그램이 실제로 어떻게 도는지 두 경로로 풀어봄
+
+### 케이스 1 — QA 경로: self-RAG 재검색
+
+`"RAG에서 환각을 줄이는 방법은?"` 질문이 아래 [API](#api) 예시의 `search_retries: 1`을 만들어내는 과정 ([src/agents/qa.py](src/agents/qa.py))
+
+1. **Orchestrator** — `intent: "query"`로 분류 → QA로 라우팅
+2. **retrieve** — 원본 질문으로 초록 top-5 검색
+3. **check_sufficiency** — 검색된 초록만으론 답하기 부족하다고 판정(`sufficient: false`), 재검색용 쿼리 제안
+4. **rewrite_query** — 제안된 쿼리로 교체, `search_retries` 1 증가
+5. **retrieve** — 새 쿼리로 재검색
+6. **check_sufficiency** — 이번엔 충분하다고 판정(`sufficient: true`)
+7. **generate_answer** — 검색된 초록만 근거로 답변 생성, `[paper_id]` 인용 포함
+8. **critic** — 답변의 모든 주장이 초록에 근거함을 확인(`grounded: true`) → 응답
+
+재검색·근거검증이 몇 번 일어났는지가 **응답 필드에 그대로 노출**되는 것이 핵심 — 자기교정이 로그 뒤가 아니라 API 응답에서 보임
+
+### 케이스 2 — Researcher 경로: CRAG 필터링
+
+`"diffusion model 관련 논문 찾아줘"` 같은 검색 요청이 처리되는 과정 ([src/agents/researcher.py](src/agents/researcher.py))
+
+1. **Orchestrator** — `intent: "search"`로 분류 → Researcher로 라우팅
+2. **to_search_keyword** — 한국어 요청 문장을 arXiv 검색용 영어 키워드로 변환
+3. **expand_query** — 같은 주제를 가리키는 공식 기술 용어로 대체 검색어 생성 (원본 키워드가 놓치는 논문 확보, recall)
+4. 원본 키워드·대체 검색어 두 결과를 병합
+5. **filter_relevant** — 병합된 후보 중 검색어와 **직접** 관련된 논문만 LLM이 채점해서 남김 (비슷한 기법을 다른 분야에 쓴 논문 등 오염 제거, precision)
+6. 필터 통과 개수가 기준(3편) 미달이면 검색 범위를 넓혀 재검색 (최대 2회)
+7. 통과한 논문만 FAISS 인덱스에 저장
+
+> 실제 배포 검증 중 이 경로로 코퍼스가 48편에서 58편으로 늘어난 사례 확인 — 검색 자기교정이 실제로 코퍼스를 키움
 
 ## 주요 기능
 - 주제 검색 → 관련 논문 목록·초록·메타데이터 수집 (arXiv)
